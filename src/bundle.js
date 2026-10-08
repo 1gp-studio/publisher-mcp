@@ -10,7 +10,7 @@ export async function bundleGame(projectDirectory) {
       const file=relative?`${relative}/${entry.name}`:entry.name;
       if(entry.name.startsWith('.')||['node_modules','dist','coverage'].includes(entry.name)||/^(credentials|secrets)/i.test(entry.name)){excluded.push(file);continue;}
       if(file.length>240||file.includes('\\'))throw new Error('UNSUPPORTED_BUILD: 文件路径过长或不支持。');
-      if(['vercel.json','now.json','project.godot'].includes(entry.name)||entry.name==='api')throw new Error('UNSUPPORTED_BUILD: 暂不支持 Godot、后端 API 或自定义 Vercel 配置。');
+      if(['vercel.json','now.json','project.godot'].includes(entry.name)||entry.name==='api')throw new Error('UNSUPPORTED_BUILD: 暂不支持后端 API 或自定义 Vercel 配置；Godot 游戏请把 project_directory 指向含 project.godot 的目录。');
       const path=join(root,file),stat=await lstat(path);
       if(stat.isSymbolicLink())throw new Error('UNSUPPORTED_BUILD: 暂不支持符号链接。');
       if(stat.isDirectory()){await walk(file);continue;}
