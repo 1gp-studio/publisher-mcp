@@ -13,9 +13,9 @@
 ```toml
 [mcp_servers.onegp]
 command = "npx"
-args = ["--yes", "github:1gp-studio/publisher-mcp#v0.2.0"]
+args = ["--yes", "github:1gp-studio/publisher-mcp#v0.3.0"]
 startup_timeout_sec = 60
-tool_timeout_sec = 180
+tool_timeout_sec = 600
 ```
 
 保存并重新打开 Codex 任务。首次运行 npx 会下载本项目及依赖，需要网络访问。
@@ -27,7 +27,7 @@ tool_timeout_sec = 180
 在终端运行（`--scope project` 会写入当前游戏目录的 `.mcp.json`，只对这个项目生效；去掉则只对你本人生效）：
 
 ```sh
-claude mcp add onegp --scope project -- npx --yes github:1gp-studio/publisher-mcp#v0.2.0
+claude mcp add onegp --scope project -- npx --yes github:1gp-studio/publisher-mcp#v0.3.0
 ```
 
 或直接在游戏目录创建 `.mcp.json`：
@@ -35,7 +35,7 @@ claude mcp add onegp --scope project -- npx --yes github:1gp-studio/publisher-mc
 ```json
 {
   "mcpServers": {
-    "onegp": { "command": "npx", "args": ["--yes", "github:1gp-studio/publisher-mcp#v0.2.0"] }
+    "onegp": { "command": "npx", "args": ["--yes", "github:1gp-studio/publisher-mcp#v0.3.0"] }
   }
 }
 ```
@@ -53,28 +53,52 @@ claude mcp add onegp --scope project -- npx --yes github:1gp-studio/publisher-mc
 3. MCP 自动读取名字和介绍（Vite 项目读 package.json，Godot 项目读 project.godot）以及要上传的文件；未提供介绍时使用中性的默认介绍，不推断玩法。
 4. `publish_game` 返回构建 ID；每隔至少 10 秒调用 `get_publish_status`，直到 `ready` 或 `failed`。只有 ready 表示发布成功。
 
-## 当前支持
+## 通用静态网页发布
 
-- 直接发布当前本地游戏目录，不要求 GitHub、提交或推送。
-- Vite + npm，含 package.json、package-lock.json、index.html；或 Godot 网页导出（见下）。
-- `npm ci` → `npm run build` → `dist`，纯静态网页游戏。
-- Vite / npm：最多 300 个源码文件，总计 2 MB；较大项目可在网页选择 GitHub 发布。
-- 不支持 Next.js、后端 API、子模块、符号链接、工作区依赖、自定义 Vercel 配置、GDExtension。
-- Godot 网页导出（目前支持 Godot 4.6.1-stable 的单线程 Release 导出）：在 Godot 中添加 Web 导出预设（关闭 Thread Support，Release 导出），导出文件名为 `index.html`、放在项目目录内（如 `build/web/index.html`），导出后直接 `publish_game`。MCP 读取 `export_presets.cfg` 找到导出目录，只上传其中 Godot 写出的 `index.*` 文件、不含引擎 wasm（限 3 MB / 300 文件），引擎由平台按 SHA-1 附加，因此不需要 GitHub 或另找托管；平台暂未登记的 Godot 版本会返回支持列表。超过 3 MB 时可把导出部署到别处，用 `publish_link` 发布网址。MCP 不运行 Godot，导出早于源码时 `inspect_game` 返回 `ready: false`，请先重新导出。名称和介绍读取 `project.godot`。
-- 已部署在别处的可玩网址可用 `publish_link` 发布（或在网站用「已有游戏链接」接入），不需要重新构建。
-- MCP 不执行本地项目脚本。上传当前源码（包括未提交修改），排除隐藏文件、node_modules、dist、coverage 和常见凭证文件；遇到疑似私钥或 Token 会拒绝发布。源码在隔离的 Vercel 项目中构建。
+发布不要求 Vite。平台需要的是能直接由浏览器运行的静态网页目录，根目录含 `index.html`。支持四种流程：
+
+| 项目类型 | 调用方式 | 本地行为 |
+| --- | --- | --- |
+| 独立 HTML / JavaScript / Canvas 游戏，没有 package.json | 直接 `inspect_game` / `publish_game` | 打包当前目录中的浏览器文件，不运行 npm |
+| 已有静态网页产物，任意构建工具或框架 | 指定 `output_directory` | 只打包选中的目录，不运行构建 |
+| 使用 npm 脚本导出网页的项目 | 指定 `build_script` 和 `output_directory` | 在本地运行项目自己的脚本，不附加 Vite 参数，然后打包产物 |
+| Vite 项目 | 不提供额外参数 | 在本地运行 build 脚本，使用独立临时输出目录；完成后清理 |
+
+例如 Webpack / Parcel / Astro 等项目可以使用其自身的静态输出；Next.js 必须先配置并生成静态导出，再选择 `out`，不能上传 `.next` 服务端目录。目录名称取决于项目配置，不会仅根据框架名称猜测。依赖服务端渲染、API 或数据库的项目需要自行托管后调用 `publish_link`。使用 pnpm、yarn 或其他构建工具时，可让本地 AI 工具先构建，再选择输出目录发布；MCP 内置脚本执行器只运行 npm 脚本。
+
+已有产物：
+
+```json
+{"project_directory":"/absolute/game","output_directory":"dist"}
+```
+
+先执行项目定义的脚本，再打包：
+
+```json
+{"project_directory":"/absolute/game","build_script":"export:web","output_directory":"site"}
+```
+
+两组参数均可用于 `inspect_game` 和 `publish_game`。检查不执行脚本；已有产物会返回上传文件清单和大小。无法自动识别时返回 `OUTPUT_REQUIRED` 和可用脚本名称，由 AI 读取项目配置，选择正确输出，不需要迁移到 Vite。`output_directory` 必须是项目内的相对路径，不能经过符号链接；有构建脚本的项目禁止选择项目根目录。未构建的项目源码树不会作为兜底上传。
+
+运行构建前需自行安装项目依赖。自定义脚本模式最多执行 5 分钟，必须生成或更新输出目录的 `index.html`，否则停止，不上传旧产物，也不删除已有输出。使用增量构建且入口未变时，可明确以已有产物模式发布。项目身份取决于项目根目录，切换输出目录不会另建游戏。
+
+Godot 保留专用流程：读取 `project.godot` 和 Web 导出预设，上传本地单线程 Release 导出的 `index.*`，引擎 wasm 按哈希使用平台托管版本。MCP 不运行 Godot；导出早于源码时须先重新导出。目前支持 Godot 4.6.1-stable。引擎版本不受支持时可使用 `publish_link`。
+
+网页产物限 3 MiB / 300 文件（Godot 不含引擎）。支持 HTML、JS、CSS、JSON、字体、图片、音视频、WASM、glTF、data/bin/atlas、XML 和 webmanifest。source map、隐藏文件、依赖及常见项目配置不上传；内联 source map、检测到的凭证或符号链接导致拒绝。更大游戏可自行托管产物再接入链接。平台直接部署，不安装依赖或执行构建。
+
+**浏览器 JavaScript 和资源会提供给平台及玩家。纯 HTML/JS 游戏的这些文件本身就是可发布代码，不能声称它们仍然私密。** 不要将私密内容放入网页目录或通过构建复制进产物；过滤无法识别所有私密文件。只在你信任的项目上运行构建脚本。上传的是明确选择的网页目录，不是整个框架源码项目。
 
 ## 工具
 
 | 工具 | 用途 |
 | --- | --- |
-| inspect_game(project_directory) | 只读检测当前绝对路径，返回支持情况及构建方式（web-npm / godot-web） |
+| inspect_game(project_directory, output_directory?, build_script?) | 只读检测当前绝对路径，返回支持情况及构建方式（web-static / godot-web） |
 | connect_platform() | 建立当前客户端连接，返回用户授权网址 |
-| publish_game(project_directory, title?, description?) | 检测后发布；名称、介绍默认从项目读取 |
+| publish_game(project_directory, title?, description?, output_directory?, build_script?) | 检测后发布；名称、介绍默认从项目读取 |
 | publish_link(url, project_directory?, title?, description?) | 把已部署的可玩 HTTPS 网址发布为 1GP 游戏页，不构建；同一网址再次提交会更新同一作品 |
 | get_publish_status(build_id) | 查询当前账号自己的构建和试玩网址 |
 
-错误包含 `UNSUPPORTED_BUILD`、`POTENTIAL_SECRET`、`AUTH_REQUIRED`，`publish_link` 另有 `INVALID_URL`、`TITLE_REQUIRED`；连不上平台时为 `NETWORK_ERROR`。遇到网络不确定的发布结果不要自动重复提交，可到网站「我的发布」查看。
+需要指定输出时返回 `OUTPUT_REQUIRED`。错误包含 `LOCAL_BUILD_FAILED`、`UNSUPPORTED_BUILD`、`POTENTIAL_SECRET`、`AUTH_REQUIRED`，`publish_link` 另有 `INVALID_URL`、`TITLE_REQUIRED`；连不上平台时为 `NETWORK_ERROR`。遇到网络不确定的发布结果不要自动重复提交，可到网站「我的发布」查看。
 
 ## 授权与限制
 
@@ -83,3 +107,7 @@ claude mcp add onegp --scope project -- npx --yes github:1gp-studio/publisher-mc
 平台目前限制全站同时 2 个构建、每个账号最多 50 个作品，不设每日次数限制。账号邮箱验证由 Supabase 负责；平台管理员必须配置生产邮件服务，才能支持组织外用户收取登录邮件。Vercel 的套餐、GitHub 访问授权及构建限制仍适用。
 
 开发时可使用 `ONEGP_PLATFORM_URL` 指向另一 HTTPS 平台，或本机 HTTP localhost/127.0.0.1；凭证按平台分别保存。测试运行 `npm test`，包括真实 MCP stdio 客户端集成测试。
+
+## v0.3.0 发布顺序
+
+先部署支持 `web-static` 的平台，再发布 MCP 的 v0.3.0 tag，最后更新客户端配置并重启。旧 v0.2.0 仍上传 Vite 源码；升级 MCP 才能使用本地构建。平台保留旧协议以兼容已有客户端。平台与 tag 发布前，请使用本地源码和测试平台验证。
