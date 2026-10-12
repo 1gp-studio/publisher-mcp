@@ -141,6 +141,12 @@ test('publish_game sends a Godot export with the engine reference',async t=>{
   assert.equal(result.isError,false);
   assert.equal(body.buildMethod,'godot-web');assert.equal(body.title,'dgame');assert.equal(body.files.some(f=>f.file.endsWith('.wasm')),false);
   assert.deepEqual(body.runtime,{file:'index.wasm',sha:createHash('sha1').update('engine wasm').digest('hex'),size:11});
+  assert.equal(Object.hasOwn(body,'gameSlug'),false,'existing Godot publishing omits an update target');
+  const previousProjectId=body.projectId;
+  const update=await client.callTool({name:'publish_game',arguments:{project_directory:game,gameSlug:'transferred-godot-game'}});
+  assert.equal(update.isError,false);assert.equal(body.gameSlug,'transferred-godot-game');
+  assert.equal(body.projectId,previousProjectId,'an explicit target does not rewrite the local project identity');
+  assert.equal(body.buildMethod,'godot-web');assert.equal(body.runtime.file,'index.wasm');
 });
 test('actual MCP stdio transport exposes the tools and rejects unsupported projects',async t=>{
   const dir=await fixture(t,{'project.godot':'config_version=5'});
@@ -179,6 +185,48 @@ test('publish_game sends only local build output and never posts a failed build'
   const failed=await client.callTool({name:'publish_game',arguments:{project_directory:game}});
   assert.equal(failed.isError,true);assert.equal(JSON.parse(failed.content[0].text).code,'LOCAL_BUILD_FAILED');
   assert.equal(bodies.length,3);
+});
+
+test('publish_game targets the same owned local game from different folders and never retries a rejected target',async t=>{
+  const bodies=[];
+  const http=createServer((req,res)=>{let text='';req.on('data',c=>text+=c);req.on('end',()=>{
+    const body=JSON.parse(text);bodies.push(body);res.setHeader('Content-Type','application/json');
+    if(body.gameSlug==='not-owned'){res.statusCode=403;res.end(JSON.stringify({code:'PUBLISH_FAILED',error:'只能更新自己拥有的本地游戏。'}));return;}
+    const slug=body.gameSlug||'new-local-game';
+    res.end(JSON.stringify({id:'00000000-0000-4000-8000-000000000000',slug,state:'queued',path:`/games/${slug}`}));
+  });});
+  await new Promise(resolve=>http.listen(0,'127.0.0.1',resolve));t.after(()=>new Promise(resolve=>http.close(resolve)));
+  const origin=`http://127.0.0.1:${http.address().port}`,config=await fixture(t,{});
+  const original=await fixture(t,{'index.html':'original game'}),moved=await fixture(t,{'index.html':'updated game in another folder'});
+  const platform=new Platform({origin,configDirectory:join(config,'.config','1gp-studio')});
+  await mkdir(platform.directory,{recursive:true,mode:0o700});await writeFile(platform.file,JSON.stringify({token:'b'.repeat(64)}),{mode:0o600});
+  const client=new Client({name:'1gp-transfer-test',version:'1.0.0'});
+  await client.connect(new StdioClientTransport({command:process.execPath,args:[resolve('src/server.js')],env:{...process.env,ONEGP_PLATFORM_URL:origin,HOME:config,USERPROFILE:config},stderr:'pipe'}));t.after(()=>client.close());
+  const tools=(await client.listTools()).tools;
+  const publish=tools.find(tool=>tool.name==='publish_game');
+  assert.equal(publish.inputSchema.properties.gameSlug.type,'string');
+  assert.equal(publish.inputSchema.required.includes('gameSlug'),false);
+  assert.equal(Object.hasOwn(tools.find(tool=>tool.name==='publish_link').inputSchema.properties,'gameSlug'),false,'external links do not accept a local update target');
+  const first=await client.callTool({name:'publish_game',arguments:{project_directory:original}});
+  assert.equal(first.isError,false);assert.equal(Object.hasOwn(bodies[0],'gameSlug'),false);
+  for(const folder of [original,moved]){
+    const updated=await client.callTool({name:'publish_game',arguments:{project_directory:folder,gameSlug:'original-game-a1b2c3d4'}});
+    assert.equal(updated.isError,false);
+    assert.equal(JSON.parse(updated.content[0].text).gameUrl,`${origin}/games/original-game-a1b2c3d4`);
+  }
+  assert.equal(bodies[1].gameSlug,bodies[2].gameSlug);
+  assert.notEqual(bodies[1].projectId,bodies[2].projectId,'moving folders still changes the legacy identity, while explicit target remains stable');
+  assert.equal(bodies[2].buildMethod,'web-static');
+  assert.deepEqual(bodies[2].files,[{file:'index.html',data:Buffer.from('updated game in another folder').toString('base64'),encoding:'base64'}]);
+  for(const invalid of ['','../game','game/playing','Uppercase','-game','game--id','x'.repeat(201)]){
+    const rejected=await client.callTool({name:'publish_game',arguments:{project_directory:moved,gameSlug:invalid}});
+    assert.equal(rejected.isError,true,invalid);
+  }
+  assert.equal(bodies.length,3,'invalid targets are rejected before any upload');
+  const denied=await client.callTool({name:'publish_game',arguments:{project_directory:moved,gameSlug:'not-owned'}});
+  assert.equal(denied.isError,true);assert.equal(JSON.parse(denied.content[0].text).code,'PUBLISH_FAILED');
+  assert.equal(bodies.length,4,'a rejected target never falls back to publishing a new game');
+  assert.equal(bodies[3].gameSlug,'not-owned');
 });
 
 

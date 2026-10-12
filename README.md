@@ -13,7 +13,7 @@
 ```toml
 [mcp_servers.onegp]
 command = "npx"
-args = ["--yes", "github:1gp-studio/publisher-mcp#v0.3.0"]
+args = ["--yes", "github:1gp-studio/publisher-mcp#v0.3.1"]
 startup_timeout_sec = 60
 tool_timeout_sec = 600
 ```
@@ -27,7 +27,7 @@ tool_timeout_sec = 600
 在终端运行（`--scope project` 会写入当前游戏目录的 `.mcp.json`，只对这个项目生效；去掉则只对你本人生效）：
 
 ```sh
-claude mcp add onegp --scope project -- npx --yes github:1gp-studio/publisher-mcp#v0.3.0
+claude mcp add onegp --scope project -- npx --yes github:1gp-studio/publisher-mcp#v0.3.1
 ```
 
 或直接在游戏目录创建 `.mcp.json`：
@@ -35,7 +35,7 @@ claude mcp add onegp --scope project -- npx --yes github:1gp-studio/publisher-mc
 ```json
 {
   "mcpServers": {
-    "onegp": { "command": "npx", "args": ["--yes", "github:1gp-studio/publisher-mcp#v0.3.0"] }
+    "onegp": { "command": "npx", "args": ["--yes", "github:1gp-studio/publisher-mcp#v0.3.1"] }
   }
 }
 ```
@@ -84,6 +84,16 @@ claude mcp add onegp --scope project -- npx --yes github:1gp-studio/publisher-mc
 
 Godot 保留专用流程：读取 `project.godot` 和 Web 导出预设，上传本地单线程 Release 导出的 `index.*`，引擎 wasm 按哈希使用平台托管版本。MCP 不运行 Godot；导出早于源码时须先重新导出。目前支持 Godot 4.6.1-stable。引擎版本不受支持时可使用 `publish_link`。
 
+### 更新转移或移动后的游戏
+
+本地项目默认按当前账号和项目根目录识别。接收游戏所有权后，或把项目移动到另一个文件夹、另一台电脑时，使用 `publish_game` 的可选 `gameSlug` 指定要更新的原游戏，避免另建作品。标识取自游戏页面网址的 `/games/` 后面，例如 `/games/my-game-a1b2c3d4` 对应 `my-game-a1b2c3d4`。
+
+```json
+{"project_directory":"/absolute/new-game-folder","output_directory":"dist","gameSlug":"my-game-a1b2c3d4"}
+```
+
+Godot 也使用同一个 `gameSlug` 参数，不需要 `output_directory`。平台只允许更新当前账号拥有的、本地上传的游戏；目标不存在、属于他人或来自 GitHub / 外部链接时会报错，不会退回到新建游戏。游戏页面标识和玩家数据保持不变。不指定 `gameSlug` 时，仍按原有文件夹规则发布。此参数需使用 MCP v0.3.1 或更新版本，以及支持游戏转移的平台版本；旧版 MCP 不会发送更新目标。
+
 网页产物限 3 MiB / 300 文件（Godot 不含引擎）。支持 HTML、JS、CSS、JSON、字体、图片、音视频、WASM、glTF、data/bin/atlas、XML 和 webmanifest。source map、隐藏文件、依赖及常见项目配置不上传；内联 source map、检测到的凭证或符号链接导致拒绝。更大游戏可自行托管产物再接入链接。平台直接部署，不安装依赖或执行构建。
 
 **浏览器 JavaScript 和资源会提供给平台及玩家。纯 HTML/JS 游戏的这些文件本身就是可发布代码，不能声称它们仍然私密。** 不要将私密内容放入网页目录或通过构建复制进产物；过滤无法识别所有私密文件。只在你信任的项目上运行构建脚本。上传的是明确选择的网页目录，不是整个框架源码项目。
@@ -94,7 +104,7 @@ Godot 保留专用流程：读取 `project.godot` 和 Web 导出预设，上传�
 | --- | --- |
 | inspect_game(project_directory, output_directory?, build_script?) | 只读检测当前绝对路径，返回支持情况及构建方式（web-static / godot-web） |
 | connect_platform() | 建立当前客户端连接，返回用户授权网址 |
-| publish_game(project_directory, title?, description?, output_directory?, build_script?) | 检测后发布；名称、介绍默认从项目读取 |
+| publish_game(project_directory, title?, description?, output_directory?, build_script?, gameSlug?) | 检测后发布；可指定原游戏标识，在转移所有权或移动文件夹后继续更新同一游戏 |
 | publish_link(url, project_directory?, title?, description?) | 把已部署的可玩 HTTPS 网址发布为 1GP 游戏页，不构建；同一网址再次提交会更新同一作品 |
 | get_publish_status(build_id) | 查询当前账号自己的构建和试玩网址 |
 
@@ -107,6 +117,10 @@ Godot 保留专用流程：读取 `project.godot` 和 Web 导出预设，上传�
 平台目前限制全站同时 2 个构建、每个账号最多 50 个作品，不设每日次数限制。账号邮箱验证由 Supabase 负责；平台管理员必须配置生产邮件服务，才能支持组织外用户收取登录邮件。Vercel 的套餐、GitHub 访问授权及构建限制仍适用。
 
 开发时可使用 `ONEGP_PLATFORM_URL` 指向另一 HTTPS 平台，或本机 HTTP localhost/127.0.0.1；凭证按平台分别保存。测试运行 `npm test`，包括真实 MCP stdio 客户端集成测试。
+
+## v0.3.1 发布顺序
+
+先同步游戏所有权管理所需的数据库迁移并部署支持 `gameSlug` 的平台，再发布 MCP 的 v0.3.1 tag。客户端需更新安装配置中的版本并重启，才能使用新参数。旧 v0.3.0 保留按文件夹发布的行为；转移或移动后的游戏应升级后再指定 `gameSlug` 更新。
 
 ## v0.3.0 发布顺序
 
