@@ -7,6 +7,7 @@ import { spawn } from 'node:child_process';
 const allowed=/\.(?:[cm]?js|json|html|css|svg|png|jpe?g|webp|gif|ico|woff2?|ttf|otf|ogg|mp3|wav|mp4|webm|wasm|glb|gltf|txt|data|bin|atlas|webmanifest|xml)$/i;
 const limit=3*1024*1024;
 // Only read a fresh build output, never the project tree.
+// 1gp-kit/ at the top is the store-page kit (cover, screenshots, preview video) imported on the website, not part of the game.
 export async function bundleOutput(root,output) {
   const outputStat=await lstat(output);
   if(!outputStat.isDirectory()||outputStat.isSymbolicLink())throw new Error('UNSUPPORTED_BUILD: 构建输出必须是普通目录，不能是符号链接。');
@@ -18,7 +19,7 @@ export async function bundleOutput(root,output) {
       if(file.length>240||file.includes('\\'))throw new Error('UNSUPPORTED_BUILD: 文件路径过长或不支持。');
       const path=join(output,file),stat=await lstat(path);
       if(stat.isSymbolicLink())throw new Error('UNSUPPORTED_BUILD: 构建产物中不支持符号链接。');
-      if(entry.name.startsWith('.')||['node_modules','api','server'].includes(entry.name)||/^(?:credentials|secrets)/i.test(entry.name)||/^(?:package(?:-lock)?\.json|(?:tsconfig.*|vercel|now)\.json|.*\.config\.[cm]?[jt]s|.*\.map)$/i.test(entry.name)){excluded.push(file);continue;}
+      if(entry.name.startsWith('.')||['node_modules','api','server'].includes(entry.name)||(!relative&&entry.name==='1gp-kit')||/^(?:credentials|secrets)/i.test(entry.name)||/^(?:package(?:-lock)?\.json|(?:tsconfig.*|vercel|now)\.json|.*\.config\.[cm]?[jt]s|.*\.map)$/i.test(entry.name)){excluded.push(file);continue;}
       if(stat.isDirectory()){await walk(file);continue;}
       if(!stat.isFile()||!allowed.test(file)){excluded.push(file);continue;}
       if(size+stat.size>limit||files.length>=300)throw new Error('UNSUPPORTED_BUILD: 网页产物最多 300 个文件、3 MB；更大游戏请自行托管后使用 publish_link。');

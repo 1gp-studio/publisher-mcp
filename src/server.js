@@ -9,7 +9,7 @@ import { bundleGame } from './bundle.js';
 import { bundleGodotExport } from './godot.js';
 import { Platform } from './platform.js';
 const platform=new Platform();
-const server=new McpServer({name:'1gp-publisher',version:'0.3.1'});
+const server=new McpServer({name:'1gp-publisher',version:'0.3.2'});
 const result=data=>({content:[{type:'text',text:JSON.stringify(data,null,2)}],isError:!!data.error||data.supported===false||data.ready===false});
 const webOptions={output_directory:z.string().min(1).max(240).optional().describe('Relative static web output folder, such as dist, build, out, or a dedicated HTML game folder. Without build_script, upload this existing export. Never select a source project root with build scripts.'),build_script:z.string().regex(/^[A-Za-z0-9:_-]{1,80}$/).optional().describe('Existing npm script name to run locally before packaging output_directory. Do not supply a shell command. For other package managers, build with local tools first and publish the existing output.')};
 const directory=z.string().describe('Absolute path of the current game project. Infer it from the active workspace; do not ask the user to fill a web form.');

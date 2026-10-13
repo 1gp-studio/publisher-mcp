@@ -41,6 +41,14 @@ test('inspection does not execute scripts; local builds upload only fresh output
   await assert.rejects(bundleGame(dir),/LOCAL_BUILD_FAILED/);
   assert.equal((await readdir(dir)).some(n=>n.startsWith('.1gp-build-')),false);
 });
+test('the store kit folder at the top is never uploaded with the game',async t=>{
+  const dir=await fixture(t,{'index.html':'game'});
+  await mkdir(join(dir,'1gp-kit'));await mkdir(join(dir,'levels/1gp-kit'),{recursive:true});
+  await writeFile(join(dir,'1gp-kit/game.json'),'{}');await writeFile(join(dir,'1gp-kit/preview.webm'),'x'.repeat(4*1024*1024));await writeFile(join(dir,'levels/1gp-kit/a.json'),'{}');
+  const bundle=await bundleOutput(dir,dir);
+  assert.deepEqual(bundle.files.map(f=>f.file),['index.html','levels/1gp-kit/a.json']);
+  assert.ok(bundle.excluded.includes('1gp-kit'));
+});
 test('output validation rejects inline maps, credentials, symlinks and oversized exports',async t=>{
   const dir=await fixture(t,{'index.html':'game','game.js':'//# sourceMappingURL=data:application/json;base64,e30='});
   await assert.rejects(bundleOutput(dir,dir),/source map/);

@@ -13,7 +13,7 @@
 ```toml
 [mcp_servers.onegp]
 command = "npx"
-args = ["--yes", "github:1gp-studio/publisher-mcp#v0.3.1"]
+args = ["--yes", "github:1gp-studio/publisher-mcp#v0.3.2"]
 startup_timeout_sec = 60
 tool_timeout_sec = 600
 ```
@@ -27,7 +27,7 @@ tool_timeout_sec = 600
 在终端运行（`--scope project` 会写入当前游戏目录的 `.mcp.json`，只对这个项目生效；去掉则只对你本人生效）：
 
 ```sh
-claude mcp add onegp --scope project -- npx --yes github:1gp-studio/publisher-mcp#v0.3.1
+claude mcp add onegp --scope project -- npx --yes github:1gp-studio/publisher-mcp#v0.3.2
 ```
 
 或直接在游戏目录创建 `.mcp.json`：
@@ -35,7 +35,7 @@ claude mcp add onegp --scope project -- npx --yes github:1gp-studio/publisher-mc
 ```json
 {
   "mcpServers": {
-    "onegp": { "command": "npx", "args": ["--yes", "github:1gp-studio/publisher-mcp#v0.3.1"] }
+    "onegp": { "command": "npx", "args": ["--yes", "github:1gp-studio/publisher-mcp#v0.3.2"] }
   }
 }
 ```
@@ -117,6 +117,10 @@ Godot 也使用同一个 `gameSlug` 参数，不需要 `output_directory`。平�
 平台目前限制全站同时 2 个构建、每个账号最多 50 个作品，不设每日次数限制。账号邮箱验证由 Supabase 负责；平台管理员必须配置生产邮件服务，才能支持组织外用户收取登录邮件。Vercel 的套餐、GitHub 访问授权及构建限制仍适用。
 
 开发时可使用 `ONEGP_PLATFORM_URL` 指向另一 HTTPS 平台，或本机 HTTP localhost/127.0.0.1；凭证按平台分别保存。测试运行 `npm test`，包括真实 MCP stdio 客户端集成测试。
+
+## v0.3.2
+
+打包时跳过项目顶层的 `1gp-kit/` 文件夹。这个文件夹是 1gp-store-kit Skill 生成的上架物料（封面、截图、预览视频），在网站上导入，不属于游戏本身；旧版本会把它一起上传，预览视频会超出 3 MB 上限。只改客户端，平台无需改动。
 
 ## v0.3.1 发布顺序
 
