@@ -13,7 +13,7 @@
 ```toml
 [mcp_servers.onegp]
 command = "npx"
-args = ["--yes", "github:1gp-studio/publisher-mcp#v0.3.2"]
+args = ["--yes", "github:1gp-studio/publisher-mcp#v0.4.0"]
 startup_timeout_sec = 60
 tool_timeout_sec = 600
 ```
@@ -27,7 +27,7 @@ tool_timeout_sec = 600
 在终端运行（`--scope project` 会写入当前游戏目录的 `.mcp.json`，只对这个项目生效；去掉则只对你本人生效）：
 
 ```sh
-claude mcp add onegp --scope project -- npx --yes github:1gp-studio/publisher-mcp#v0.3.2
+claude mcp add onegp --scope project -- npx --yes github:1gp-studio/publisher-mcp#v0.4.0
 ```
 
 或直接在游戏目录创建 `.mcp.json`：
@@ -35,7 +35,7 @@ claude mcp add onegp --scope project -- npx --yes github:1gp-studio/publisher-mc
 ```json
 {
   "mcpServers": {
-    "onegp": { "command": "npx", "args": ["--yes", "github:1gp-studio/publisher-mcp#v0.3.2"] }
+    "onegp": { "command": "npx", "args": ["--yes", "github:1gp-studio/publisher-mcp#v0.4.0"] }
   }
 }
 ```
@@ -64,7 +64,7 @@ claude mcp add onegp --scope project -- npx --yes github:1gp-studio/publisher-mc
 | 使用 npm 脚本导出网页的项目 | 指定 `build_script` 和 `output_directory` | 在本地运行项目自己的脚本，不附加 Vite 参数，然后打包产物 |
 | Vite 项目 | 不提供额外参数 | 在本地运行 build 脚本，使用独立临时输出目录；完成后清理 |
 
-例如 Webpack / Parcel / Astro 等项目可以使用其自身的静态输出；Next.js 必须先配置并生成静态导出，再选择 `out`，不能上传 `.next` 服务端目录。目录名称取决于项目配置，不会仅根据框架名称猜测。依赖服务端渲染、API 或数据库的项目需要自行托管后调用 `publish_link`。使用 pnpm、yarn 或其他构建工具时，可让本地 AI 工具先构建，再选择输出目录发布；MCP 内置脚本执行器只运行 npm 脚本。
+例如 Webpack / Parcel / Astro 等项目可以使用其自身的静态输出；Next.js 必须先配置并生成静态导出，再选择 `out`，不能上传 `.next` 服务端目录。目录名称取决于项目配置，不会仅根据框架名称猜测。依赖服务端的项目可由团队账号使用下方 Docker 托管流程；已有托管地址也可以调用 `publish_link`。使用 pnpm、yarn 或其他构建工具时，可让本地 AI 工具先构建，再选择输出目录发布；MCP 内置脚本执行器只运行 npm 脚本。
 
 已有产物：
 
@@ -118,7 +118,7 @@ Godot 也使用同一个 `gameSlug` 参数，不需要 `output_directory`。平�
 
 开发时可使用 `ONEGP_PLATFORM_URL` 指向另一 HTTPS 平台，或本机 HTTP localhost/127.0.0.1；凭证按平台分别保存。测试运行 `npm test`，包括真实 MCP stdio 客户端集成测试。
 
-## v0.3.2
+## v0.4.0
 
 打包时跳过项目顶层的 `1gp-kit/` 文件夹。这个文件夹是 1gp-store-kit Skill 生成的上架物料（封面、截图、预览视频），在网站上导入，不属于游戏本身；旧版本会把它一起上传，预览视频会超出 3 MB 上限。只改客户端，平台无需改动。
 
@@ -129,3 +129,50 @@ Godot 也使用同一个 `gameSlug` 参数，不需要 `output_directory`。平�
 ## v0.3.0 发布顺序
 
 先部署支持 `web-static` 的平台，再发布 MCP 的 v0.3.0 tag，最后更新客户端配置并重启。旧 v0.2.0 仍上传 Vite 源码；升级 MCP 才能使用本地构建。平台保留旧协议以兼容已有客户端。平台与 tag 发布前，请使用本地源码和测试平台验证。
+
+
+## Docker 游戏：全程在本地 AI 工具里发布
+
+需要 Node.js 24+、Docker（含 Buildx），Windows 的 Docker Desktop 需使用 Linux containers。
+只需要已有的 **1GP 平台授权**；无需 AWS 账号、AWS SSO、Access Key 或 ECR 登录。
+当前沿用团队管理员账号、单台主机一个游戏的实验范围。
+
+可以直接告诉 AI：
+
+> 用 1GP MCP 把当前游戏发布到 EC2 Docker 托管。检查代码并准备 Dockerfile 和 .dockerignore，在本地构建 Linux/amd64 镜像，上传给平台，等校验通过后发布，把可玩的链接给我。使用稳定的项目标识 my-game，更新时不要改变它。不要申请 AWS 凭证，也不要直接推送 ECR。
+
+工具调用顺序：
+
+1. `connect_platform`：复用现有授权。首次连接仍需用户本人在浏览器确认平台授权，之后不需要去网页上传。
+2. 检查实际代码，使用本地编辑工具准备 Dockerfile 和 `.dockerignore`，本地测试 HTTP/WebSocket。MCP 不会猜测或自动覆盖 Dockerfile。
+3. `build_docker_image({project_directory})`：执行固定参数的 Docker Buildx 构建与 `docker save`，返回本地 `archive_path`。也可跳过构建，使用已有 Docker archive。
+4. `upload_docker_image({archive_path, project})`：流式上传文件至平台私有暂存区，返回 `upload_id`。不把镜像转成 Base64，也不把平台令牌发给 S3。
+5. 每隔至少 10 秒调用 `get_docker_upload_status({upload_id})`，直到 `ready` 或 `failed`。准备好后才进入发布。
+6. `publish_docker_game({upload_id, project, title, description})`：项目标识必须与上传时一致。返回构建 ID 后，每隔至少 10 秒调用已有的 `get_publish_status`，只有 `ready` 才表示发布成功。
+
+上传任务 ID 会保存在 MCP 的本地私有配置目录。上传中断或工具重启后，可调用
+`get_docker_upload_status({})` 恢复最后一次任务；如果文件已传完，会继续完成平台导入。
+不会自动重复上传或重复发布。未传完的上传占位在 20 分钟后过期，可重用本地镜像文件重试。
+发布请求的响应不确定时，不要直接再发一次发布；先检查已返回的构建 ID，或在平台确认状态。
+
+镜像要求：Linux/amd64、非 root USER、无 VOLUME、监听 `0.0.0.0:3000`、`GET /` 返回 2xx。
+运行资源为 512 MiB 内存、1 CPU、只读文件系统，仅 `/tmp` 可写（64 MiB）。持久化数据放外部服务。
+导出的未压缩 `.tar` 最多 256 MiB，内部镜像层展开后最多 512 MiB；不支持 `docker export`。
+导入不会运行游戏；发布同一项目会短暂断线并重置内存状态，部署失败会保留或恢复旧容器。
+
+构建前 `.dockerignore` 必须至少包含下列规则，且不使用 `!` 重新包含；若有
+`Dockerfile.dockerignore`，先合并到根 `.dockerignore`。还应检查项目自己的其他敏感文件。
+
+```gitignore
+**/.env*
+**/.git
+**/.aws
+**/.ssh
+**/.config
+**/*.pem
+**/*.key
+```
+
+这些规则不等于完整的镜像密钥扫描。不要在 Dockerfile、源文件或构建参数中嵌入凭证。
+构建会在本机执行 Dockerfile；本地构建日志不经 MCP 返回，以免暴露构建过程里的敏感内容。
+MCP 自动移除自己创建的临时镜像标签，保留私有临时目录中的 `.tar` 供重试；导入成功后可用本地工具删除该文件。

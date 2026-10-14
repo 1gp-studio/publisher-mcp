@@ -161,7 +161,7 @@ test('actual MCP stdio transport exposes the tools and rejects unsupported proje
   const client=new Client({name:'1gp-integration-test',version:'1.0.0'});
   const transport=new StdioClientTransport({command:process.execPath,args:[resolve('src/server.js')],stderr:'pipe'});
   await client.connect(transport);t.after(()=>client.close());
-  assert.deepEqual((await client.listTools()).tools.map(t=>t.name).sort(),['connect_platform','get_publish_status','inspect_game','publish_game','publish_link']);
+  assert.deepEqual((await client.listTools()).tools.map(t=>t.name).sort(),['build_docker_image','connect_platform','get_docker_upload_status','get_publish_status','inspect_game','publish_docker_game','publish_game','publish_link','upload_docker_image']);
   const result=await client.callTool({name:'publish_game',arguments:{project_directory:dir}});
   assert.equal(result.isError,true);assert.equal(JSON.parse(result.content[0].text).code,'UNSUPPORTED_BUILD');
 });
@@ -300,4 +300,21 @@ test('Godot rejects export directories and ancestor links that leave the project
     await symlink(target,join(dir,'linked'),process.platform==='win32'?'junction':'dir');
     await assert.rejects(()=>bundleGodotExport(dir),/Web 导出路径必须位于项目目录内/);
   }
+});
+
+test('Docker MCP publication requires a ready matching upload and sends no ECR credentials',async t=>{
+  const bodies=[];let state='importing';
+  const http=createServer((req,res)=>{let text='';req.on('data',c=>text+=c);req.on('end',()=>{res.setHeader('Content-Type','application/json');if(req.url.startsWith('/api/publish/docker/uploads/'))res.end(JSON.stringify({state,project:'game'}));else{bodies.push(JSON.parse(text));res.end(JSON.stringify({id:'00000000-0000-4000-8000-000000000000',path:'/games/docker',state:'queued'}));}});});
+  await new Promise(resolve=>http.listen(0,'127.0.0.1',resolve));t.after(()=>new Promise(resolve=>http.close(resolve)));
+  const origin=`http://127.0.0.1:${http.address().port}`,config=await fixture(t,{});
+  const platform=new Platform({origin,configDirectory:join(config,'.config','1gp-studio')});
+  await mkdir(platform.directory,{recursive:true,mode:0o700});await writeFile(platform.file,JSON.stringify({token:'b'.repeat(64)}),{mode:0o600});
+  const client=new Client({name:'1gp-docker-test',version:'1.0.0'});
+  await client.connect(new StdioClientTransport({command:process.execPath,args:[resolve('src/server.js')],env:{...process.env,ONEGP_PLATFORM_URL:origin,HOME:config,USERPROFILE:config},stderr:'pipe'}));t.after(()=>client.close());
+  const args={upload_id:'11111111-1111-4111-8111-111111111111',project:'game',title:'Docker game'};
+  assert.equal((await client.callTool({name:'publish_docker_game',arguments:args})).isError,true);assert.equal(bodies.length,0);
+  state='ready';assert.equal((await client.callTool({name:'publish_docker_game',arguments:{...args,project:'other'}})).isError,true);assert.equal(bodies.length,0);
+  const published=await client.callTool({name:'publish_docker_game',arguments:args});assert.equal(published.isError,false);
+  assert.deepEqual(bodies,[{source:'docker',hosting:'ec2-docker',uploadId:args.upload_id,project:'game',title:'Docker game',description:''}]);
+  assert.equal(JSON.parse(published.content[0].text).gameUrl,origin+'/games/docker');
 });
