@@ -16,6 +16,7 @@ async function fixture(t,files) {
   for(const [name,value] of Object.entries(files))await writeFile(join(dir,name),value);
   return dir;
 }
+const release={version:'1.0.0',title:'First release',notes:'Initial playable game',changeType:'minor'};
 const web={'package.json':JSON.stringify({name:'test-game',description:'A game',scripts:{build:'vite build'},devDependencies:{vite:'7'}}),'package-lock.json':'{}','index.html':'<div>game</div>'};
 test('Godot and non-Vite projects return unsupported before executing anything',async t=>{
   const dir=await fixture(t,{'project.godot':'config_version=5',...web});
@@ -83,11 +84,13 @@ test('publish_link posts an external URL with the client token and returns the g
   const client=new Client({name:'1gp-link-test',version:'1.0.0'});
   const transport=new StdioClientTransport({command:process.execPath,args:[resolve('src/server.js')],env:{...process.env,ONEGP_PLATFORM_URL:origin,HOME:config,USERPROFILE:config},stderr:'pipe'});
   await client.connect(transport);t.after(()=>client.close());
-  const bad=await client.callTool({name:'publish_link',arguments:{url:'http://example.com/game/'}});
+  const missing=await client.callTool({name:'publish_link',arguments:{url:'https://example.github.io/dgame/'}});
+  assert.equal(JSON.parse(missing.content[0].text).code,'RELEASE_NOTES_REQUIRED');
+  const bad=await client.callTool({name:'publish_link',arguments:{release,url:'http://example.com/game/'}});
   assert.equal(bad.isError,true);assert.equal(JSON.parse(bad.content[0].text).code,'INVALID_URL');
-  const result=await client.callTool({name:'publish_link',arguments:{url:'https://example.github.io/dgame/',project_directory:game}});
+  const result=await client.callTool({name:'publish_link',arguments:{release,url:'https://example.github.io/dgame/',project_directory:game}});
   const data=JSON.parse(result.content[0].text);
-  assert.equal(seen,`Bearer ${token}`);assert.deepEqual(body,{source:'external',url:'https://example.github.io/dgame/',title:'dgame',description:'Ink hero defense'});
+  assert.equal(seen,`Bearer ${token}`);assert.deepEqual(body,{source:'external',release,url:'https://example.github.io/dgame/',title:'dgame',description:'Ink hero defense'});
   assert.equal(data.gameUrl,`${origin}/games/game-abc`);
 });
 async function godotFixture(t) {
@@ -145,13 +148,13 @@ test('publish_game sends a Godot export with the engine reference',async t=>{
   const {mkdir}=await import('node:fs/promises');await mkdir(platform.directory,{recursive:true,mode:0o700});await writeFile(platform.file,JSON.stringify({token:'b'.repeat(64)}),{mode:0o600});
   const client=new Client({name:'1gp-godot-test',version:'1.0.0'});
   await client.connect(new StdioClientTransport({command:process.execPath,args:[resolve('src/server.js')],env:{...process.env,ONEGP_PLATFORM_URL:origin,HOME:config,USERPROFILE:config},stderr:'pipe'}));t.after(()=>client.close());
-  const result=await client.callTool({name:'publish_game',arguments:{project_directory:game}});
+  const result=await client.callTool({name:'publish_game',arguments:{release,project_directory:game}});
   assert.equal(result.isError,false);
   assert.equal(body.buildMethod,'godot-web');assert.equal(body.title,'dgame');assert.equal(body.files.some(f=>f.file.endsWith('.wasm')),false);
   assert.deepEqual(body.runtime,{file:'index.wasm',sha:createHash('sha1').update('engine wasm').digest('hex'),size:11});
   assert.equal(Object.hasOwn(body,'gameSlug'),false,'existing Godot publishing omits an update target');
   const previousProjectId=body.projectId;
-  const update=await client.callTool({name:'publish_game',arguments:{project_directory:game,gameSlug:'transferred-godot-game'}});
+  const update=await client.callTool({name:'publish_game',arguments:{release,project_directory:game,gameSlug:'transferred-godot-game'}});
   assert.equal(update.isError,false);assert.equal(body.gameSlug,'transferred-godot-game');
   assert.equal(body.projectId,previousProjectId,'an explicit target does not rewrite the local project identity');
   assert.equal(body.buildMethod,'godot-web');assert.equal(body.runtime.file,'index.wasm');
@@ -161,8 +164,8 @@ test('actual MCP stdio transport exposes the tools and rejects unsupported proje
   const client=new Client({name:'1gp-integration-test',version:'1.0.0'});
   const transport=new StdioClientTransport({command:process.execPath,args:[resolve('src/server.js')],stderr:'pipe'});
   await client.connect(transport);t.after(()=>client.close());
-  assert.deepEqual((await client.listTools()).tools.map(t=>t.name).sort(),['build_docker_image','connect_platform','get_docker_upload_status','get_publish_status','inspect_game','publish_docker_game','publish_game','publish_link','upload_docker_image']);
-  const result=await client.callTool({name:'publish_game',arguments:{project_directory:dir}});
+  assert.deepEqual((await client.listTools()).tools.map(t=>t.name).sort(),['build_docker_image','connect_platform','get_docker_upload_status','get_publish_status','inspect_game','prepare_release','publish_docker_game','publish_game','publish_link','upload_docker_image']);
+  const result=await client.callTool({name:'publish_game',arguments:{release,project_directory:dir}});
   assert.equal(result.isError,true);assert.equal(JSON.parse(result.content[0].text).code,'UNSUPPORTED_BUILD');
 });
 
@@ -177,20 +180,20 @@ test('publish_game sends only local build output and never posts a failed build'
   await mkdir(platform.directory,{recursive:true,mode:0o700});await writeFile(platform.file,JSON.stringify({token:'b'.repeat(64)}),{mode:0o600});
   const client=new Client({name:'1gp-static-test',version:'1.0.0'});
   await client.connect(new StdioClientTransport({command:process.execPath,args:[resolve('src/server.js')],env:{...process.env,ONEGP_PLATFORM_URL:origin,HOME:config,USERPROFILE:config},stderr:'pipe'}));t.after(()=>client.close());
-  const result=await client.callTool({name:'publish_game',arguments:{project_directory:game}});
+  const result=await client.callTool({name:'publish_game',arguments:{release,project_directory:game}});
   assert.equal(result.isError,false);
   assert.equal(bodies.length,1);assert.equal(bodies[0].buildMethod,'web-static');
   assert.deepEqual(bodies[0].files,[{file:'index.html',data:Buffer.from('built game').toString('base64'),encoding:'base64'}]);
   await writeFile(join(game,'export.cjs'),`const fs=require('node:fs');fs.mkdirSync('site',{recursive:true});fs.writeFileSync('site/index.html','generic export');`);
   await writeFile(join(game,'package.json'),JSON.stringify({name:'local-game',devDependencies:{vite:'7'},scripts:{build:'node build.cjs','export:web':'node export.cjs'}}));
-  const generic=await client.callTool({name:'publish_game',arguments:{project_directory:game,output_directory:'site',build_script:'export:web'}});
+  const generic=await client.callTool({name:'publish_game',arguments:{release,project_directory:game,output_directory:'site',build_script:'export:web'}});
   assert.equal(generic.isError,false);assert.equal(bodies.length,2);
   assert.deepEqual(bodies[1].files,[{file:'index.html',data:Buffer.from('generic export').toString('base64'),encoding:'base64'}]);
   assert.equal(bodies[0].projectId,bodies[1].projectId);
-  const prebuilt=await client.callTool({name:'publish_game',arguments:{project_directory:game,output_directory:'site'}});
+  const prebuilt=await client.callTool({name:'publish_game',arguments:{release,project_directory:game,output_directory:'site'}});
   assert.equal(prebuilt.isError,false);assert.equal(bodies.length,3);
   await writeFile(join(game,'build.cjs'),'process.exit(1)');
-  const failed=await client.callTool({name:'publish_game',arguments:{project_directory:game}});
+  const failed=await client.callTool({name:'publish_game',arguments:{release,project_directory:game}});
   assert.equal(failed.isError,true);assert.equal(JSON.parse(failed.content[0].text).code,'LOCAL_BUILD_FAILED');
   assert.equal(bodies.length,3);
 });
@@ -215,10 +218,10 @@ test('publish_game targets the same owned local game from different folders and 
   assert.equal(publish.inputSchema.properties.gameSlug.type,'string');
   assert.equal(publish.inputSchema.required.includes('gameSlug'),false);
   assert.equal(Object.hasOwn(tools.find(tool=>tool.name==='publish_link').inputSchema.properties,'gameSlug'),false,'external links do not accept a local update target');
-  const first=await client.callTool({name:'publish_game',arguments:{project_directory:original}});
+  const first=await client.callTool({name:'publish_game',arguments:{release,project_directory:original}});
   assert.equal(first.isError,false);assert.equal(Object.hasOwn(bodies[0],'gameSlug'),false);
   for(const folder of [original,moved]){
-    const updated=await client.callTool({name:'publish_game',arguments:{project_directory:folder,gameSlug:'original-game-a1b2c3d4'}});
+    const updated=await client.callTool({name:'publish_game',arguments:{release,project_directory:folder,gameSlug:'original-game-a1b2c3d4'}});
     assert.equal(updated.isError,false);
     assert.equal(JSON.parse(updated.content[0].text).gameUrl,`${origin}/games/original-game-a1b2c3d4`);
   }
@@ -227,11 +230,11 @@ test('publish_game targets the same owned local game from different folders and 
   assert.equal(bodies[2].buildMethod,'web-static');
   assert.deepEqual(bodies[2].files,[{file:'index.html',data:Buffer.from('updated game in another folder').toString('base64'),encoding:'base64'}]);
   for(const invalid of ['','../game','game/playing','Uppercase','-game','game--id','x'.repeat(201)]){
-    const rejected=await client.callTool({name:'publish_game',arguments:{project_directory:moved,gameSlug:invalid}});
+    const rejected=await client.callTool({name:'publish_game',arguments:{release,project_directory:moved,gameSlug:invalid}});
     assert.equal(rejected.isError,true,invalid);
   }
   assert.equal(bodies.length,3,'invalid targets are rejected before any upload');
-  const denied=await client.callTool({name:'publish_game',arguments:{project_directory:moved,gameSlug:'not-owned'}});
+  const denied=await client.callTool({name:'publish_game',arguments:{release,project_directory:moved,gameSlug:'not-owned'}});
   assert.equal(denied.isError,true);assert.equal(JSON.parse(denied.content[0].text).code,'PUBLISH_FAILED');
   assert.equal(bodies.length,4,'a rejected target never falls back to publishing a new game');
   assert.equal(bodies[3].gameSlug,'not-owned');
@@ -312,9 +315,9 @@ test('Docker MCP publication requires a ready matching upload and sends no ECR c
   const client=new Client({name:'1gp-docker-test',version:'1.0.0'});
   await client.connect(new StdioClientTransport({command:process.execPath,args:[resolve('src/server.js')],env:{...process.env,ONEGP_PLATFORM_URL:origin,HOME:config,USERPROFILE:config},stderr:'pipe'}));t.after(()=>client.close());
   const args={upload_id:'11111111-1111-4111-8111-111111111111',project:'game',title:'Docker game'};
-  assert.equal((await client.callTool({name:'publish_docker_game',arguments:args})).isError,true);assert.equal(bodies.length,0);
-  state='ready';assert.equal((await client.callTool({name:'publish_docker_game',arguments:{...args,project:'other'}})).isError,true);assert.equal(bodies.length,0);
-  const published=await client.callTool({name:'publish_docker_game',arguments:args});assert.equal(published.isError,false);
-  assert.deepEqual(bodies,[{source:'docker',hosting:'ec2-docker',uploadId:args.upload_id,project:'game',title:'Docker game',description:''}]);
+  assert.equal((await client.callTool({name:'publish_docker_game',arguments:{...args,release}})).isError,true);assert.equal(bodies.length,0);
+  state='ready';assert.equal((await client.callTool({name:'publish_docker_game',arguments:{...args,release,project:'other'}})).isError,true);assert.equal(bodies.length,0);
+  const published=await client.callTool({name:'publish_docker_game',arguments:{...args,release}});assert.equal(published.isError,false);
+  assert.deepEqual(bodies,[{source:'docker',release,hosting:'ec2-docker',uploadId:args.upload_id,project:'game',title:'Docker game',description:''}]);
   assert.equal(JSON.parse(published.content[0].text).gameUrl,origin+'/games/docker');
 });

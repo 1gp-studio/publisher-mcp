@@ -13,7 +13,7 @@
 ```toml
 [mcp_servers.onegp]
 command = "npx"
-args = ["--yes", "github:1gp-studio/publisher-mcp#v0.4.0"]
+args = ["--yes", "github:1gp-studio/publisher-mcp#v0.5.0"]
 startup_timeout_sec = 60
 tool_timeout_sec = 600
 ```
@@ -27,7 +27,7 @@ tool_timeout_sec = 600
 在终端运行（`--scope project` 会写入当前游戏目录的 `.mcp.json`，只对这个项目生效；去掉则只对你本人生效）：
 
 ```sh
-claude mcp add onegp --scope project -- npx --yes github:1gp-studio/publisher-mcp#v0.4.0
+claude mcp add onegp --scope project -- npx --yes github:1gp-studio/publisher-mcp#v0.5.0
 ```
 
 或直接在游戏目录创建 `.mcp.json`：
@@ -35,7 +35,7 @@ claude mcp add onegp --scope project -- npx --yes github:1gp-studio/publisher-mc
 ```json
 {
   "mcpServers": {
-    "onegp": { "command": "npx", "args": ["--yes", "github:1gp-studio/publisher-mcp#v0.4.0"] }
+    "onegp": { "command": "npx", "args": ["--yes", "github:1gp-studio/publisher-mcp#v0.5.0"] }
   }
 }
 ```
@@ -52,6 +52,16 @@ claude mcp add onegp --scope project -- npx --yes github:1gp-studio/publisher-mc
 2. 打开游戏项目，告诉 AI：**检查当前游戏，支持的话发布到 1GP，把试玩链接给我。**
 3. MCP 自动读取名字和介绍（Vite 项目读 package.json，Godot 项目读 project.godot）以及要上传的文件；未提供介绍时使用中性的默认介绍，不推断玩法。
 4. `publish_game` 返回构建 ID；每隔至少 10 秒调用 `get_publish_status`，直到 `ready` 或 `failed`。只有 ready 表示发布成功。
+
+## 版本号与更新说明（v0.5.0）
+
+每次发布前调用 `prepare_release(project_directory, gameSlug?, docker_project?)`，沿用游戏标识。工具将本地文件哈希与上次成功发布比较，返回新增、修改、删除的路径和版本建议。本地 AI 必须阅读相关代码，有 Git 历史时结合上次 sourceCommit 的 diff，按玩法、关卡、修复、平衡、界面和资源等主要方面精简概括。文件名不能证明具体玩法变化，没有基线时明确说明，不能编造差异。
+
+- 首发 `1.0.0`；大规模玩法重做或存档不兼容升主版本；新玩法/关卡升次版本；修复、平衡或纯资源变化升补丁版本。
+- 作者可以修改建议。所有发布工具需要 `release`，格式示例：`{"version":"1.1.0","title":"新关卡","notes":"关卡：新增森林挑战。修复：解决结算卡住。","changeType":"minor"}`。实际内容必须来自当前项目，`changeType` 为 `major`、`minor`、`patch` 或 `assets`。
+- Docker 发布传入 `project_directory` 才能保存下一次比较的源码清单。只上传路径与 SHA-256 哈希，不上传源码正文；跳过隐藏文件、依赖、常见输出和凭证，比较上限为 1,000 文件、64 MiB。
+- 成功后更新日志才对玩家展示；失败记录留在作者历史中。作者可在历史页修改版本和说明，回退可用的旧 Vercel 部署或 Docker 镜像。回退不恢复玩家存档或外部数据；产物被云服务删除后不可恢复。外部链接不支持回退。
+- 升级后重启客户端，重新加载工具。下方参数示例用于检查；调用发布时须另加 `release`。
 
 ## 通用静态网页发布
 
@@ -102,6 +112,7 @@ Godot 也使用同一个 `gameSlug` 参数，不需要 `output_directory`。平�
 
 | 工具 | 用途 |
 | --- | --- |
+| prepare_release(project_directory, gameSlug?, docker_project?) | 对比上次成功发布并获取版本建议，不构建或发布 |
 | inspect_game(project_directory, output_directory?, build_script?) | 只读检测当前绝对路径，返回支持情况及构建方式（web-static / godot-web） |
 | connect_platform() | 建立当前客户端连接，返回用户授权网址 |
 | publish_game(project_directory, title?, description?, output_directory?, build_script?, gameSlug?) | 检测后发布；可指定原游戏标识，在转移所有权或移动文件夹后继续更新同一游戏 |
