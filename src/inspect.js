@@ -1,10 +1,11 @@
 import { readFile,lstat,realpath } from 'node:fs/promises';
 import { resolve,isAbsolute,join,basename } from 'node:path';
 import { createHash } from 'node:crypto';
-import { planWeb } from './web-plan.js';
+import { planWeb,fullGameGuidance } from './web-plan.js';
+import { planVercel,bundleVercelOutput,artifactErrorCode } from './vercel-output.js';
 import { bundleOutput } from './bundle.js';
 import { bundleGodotExport } from './godot.js';
-const unsupported=reason=>({supported:false,code:reason.startsWith('POTENTIAL_SECRET')?'POTENTIAL_SECRET':'UNSUPPORTED_BUILD',reason});
+const unsupported=reason=>({supported:false,code:artifactErrorCode({message:reason}),reason});
 // A metadata file read as text: a regular file, not a symlink, of sane size.
 export async function file(directory,name) {
   const path=join(directory,name),stat=await lstat(path);
@@ -32,12 +33,22 @@ export async function inspectGame(projectDirectory,options={}) {
   try{directory=await realpath(resolve(projectDirectory));}catch{return unsupported('无法读取项目目录。');}
   let godot=null;
   try{godot=await file(directory,'project.godot');}catch{}
-  if(godot!==null&&!options.outputDirectory&&!options.buildScript)return inspectGodot(directory,godotMetadata(godot));
+  if(godot!==null&&!options.outputDirectory&&!options.buildScript&&!options.vercelOutputDirectory&&options.deploymentTarget!=='vercel')return inspectGodot(directory,godotMetadata(godot));
   let plan;
+  try{plan=await planVercel(directory,options);}catch(error){return unsupported(error.message);}
+  if(plan) {
+    const base={supported:true,source:'local',buildMethod:'vercel-output',projectId:createHash('sha256').update(directory).digest('hex').slice(0,32),title:typeof plan.pkg?.name==='string'?plan.pkg.name.replace(/^@[^/]+\//,'').slice(0,120)||'Untitled game':basename(directory).slice(0,120)||'Untitled game',description:typeof plan.pkg?.description==='string'&&plan.pkg.description.trim()?plan.pkg.description.trim().slice(0,2000):DEFAULT_DESCRIPTION,build:{mode:plan.kind,output:plan.outputDirectory,...(plan.buildScript?{script:plan.buildScript,location:'local'}:{}),hosting:'1GP managed Vercel'}};
+    if(plan.missing)return {...base,ready:false,code:'VERCEL_OUTPUT_REQUIRED',reason:fullGameGuidance,scripts:Object.keys(plan.pkg?.scripts||{})};
+    if(plan.buildScript)return {...base,ready:true,reason:'发布时在本地运行已有 npm 构建脚本，将完整 Vercel v3 产物（网页、路由、Node.js 22/24 函数及必要运行依赖）上传给 1GP 统一部署。无需用户登录 Vercel 或创建云项目；检查本身不执行脚本。'};
+    try {
+      const bundle=await bundleVercelOutput(directory,plan.output);
+      return {...base,ready:true,fileCount:bundle.files.length,functionCount:bundle.functionCount,artifactBytes:bundle.size,uploadFiles:bundle.files.map(file=>file.file),excludedFiles:bundle.excluded,reason:'上传完整 Vercel v3 产物，由 1GP 统一托管网页和服务端；无需用户 Vercel 登录、凭证或云项目。浏览器资源对玩家公开，函数产物仅用于平台服务端运行。'};
+    }catch(error){return unsupported(error.message);}
+  }
   try{plan=await planWeb(directory,options);}catch(error){return unsupported(error.message);}
   const pkg=plan.pkg;
   const base={supported:true,buildMethod:'web-static',source:'local',projectId:createHash('sha256').update(directory).digest('hex').slice(0,32),title:typeof pkg?.name==='string'?pkg.name.replace(/^@[^/]+\//,'').slice(0,120)||'Untitled game':basename(directory).slice(0,120)||'Untitled game',description:typeof pkg?.description==='string'&&pkg.description.trim()?pkg.description.trim().slice(0,2000):DEFAULT_DESCRIPTION};
-  if(plan.kind==='choose-output')return {...base,ready:false,code:'OUTPUT_REQUIRED',reason:'无需转换成 Vite。请检查项目的静态导出方式：已有产物时指定 output_directory（如 dist、build、out）；需要构建时同时提供 package.json 中的 build_script 名称。不能上传需要服务端的输出；此类项目请先自行托管，再用 publish_link。',scripts:Object.keys(pkg?.scripts||{}),alternative:'publish_link'};
+  if(plan.kind==='choose-output')return {...base,ready:false,code:'OUTPUT_REQUIRED',reason:'无需转换成 Vite。纯静态游戏已有产物时指定 output_directory（如 dist、build、out），需要构建时同时提供已有 build_script。有服务端的游戏应生成完整 Vercel Build Output API v3，再指定 deployment_target="vercel"，由 1GP 统一托管前后端。',scripts:Object.keys(pkg?.scripts||{})};
   if(plan.kind==='prebuilt') {
     try{const bundle=await bundleOutput(directory,plan.output);return {...base,ready:true,build:{mode:'prebuilt',output:plan.outputDirectory},fileCount:bundle.files.length,artifactBytes:bundle.size,uploadFiles:bundle.files.map(f=>f.file),excludedFiles:bundle.excluded,reason:'直接上传所选静态网页目录，不运行构建。HTML、浏览器 JavaScript 和资源会提供给平台及玩家；纯 HTML/JS 项目的这些文件本身就是可发布代码。请确认文件清单不含私密内容。'};}catch(error){return unsupported(error.message);}
   }

@@ -47,7 +47,8 @@ test('interrupted uploads record a private reference for a restarted MCP',async 
  const root=await fixture(t),path=join(root,'game.tar');await writeFile(path,Buffer.alloc(2048));
  const platform={file:join(root,'credential.json'),request:async()=>signed};
  await uploadDockerImage(platform,path,'game',{send:async()=>{throw Error('interrupted');}});
- const mode=(await stat(platform.file+'.docker-upload.json')).mode&0o777;assert.equal(mode,0o600);
+ // Windows has no POSIX modes (files report 0o666); the owner-only mode is checked elsewhere.
+ if(process.platform!=='win32'){const mode=(await stat(platform.file+'.docker-upload.json')).mode&0o777;assert.equal(mode,0o600);}
  const urls=[];platform.request=async url=>{urls.push(url);return {state:'ready',project:'game'};};
  const result=await dockerUploadStatus(platform);assert.equal(result.upload_id,id);assert.deepEqual(urls,[`/api/publish/docker/uploads/${id}`]);
 });

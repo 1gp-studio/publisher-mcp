@@ -22,7 +22,7 @@ test('Godot and non-Vite projects return unsupported before executing anything',
   const dir=await fixture(t,{'project.godot':'config_version=5',...web});
   const info=await inspectGame(dir);assert.equal(info.supported,false);assert.equal(info.code,'UNSUPPORTED_BUILD');assert.match(info.reason,/Godot/);
   assert.equal(info.engine,'godot');assert.equal(info.alternative,'publish_link');
-  const other=await fixture(t,{'package.json':'{"scripts":{"build":"next build"}}'});assert.equal((await inspectGame(other)).ready,false);assert.equal((await inspectGame(other)).code,'OUTPUT_REQUIRED');
+  const other=await fixture(t,{'package.json':'{"scripts":{"build":"next build"}}'});assert.equal((await inspectGame(other)).supported,false);assert.equal((await inspectGame(other)).code,'VERCEL_OUTPUT_REQUIRED');
 });
 test('local Vite projects publish without GitHub or a git commit',async t=>{
   const dir=await fixture(t,web);const info=await inspectGame(dir);
@@ -164,7 +164,13 @@ test('actual MCP stdio transport exposes the tools and rejects unsupported proje
   const client=new Client({name:'1gp-integration-test',version:'1.0.0'});
   const transport=new StdioClientTransport({command:process.execPath,args:[resolve('src/server.js')],stderr:'pipe'});
   await client.connect(transport);t.after(()=>client.close());
-  assert.deepEqual((await client.listTools()).tools.map(t=>t.name).sort(),['build_docker_image','connect_platform','get_docker_upload_status','get_publish_status','inspect_game','prepare_release','publish_docker_game','publish_game','publish_link','upload_docker_image']);
+  assert.deepEqual((await client.listTools()).tools.map(t=>t.name).sort(),['build_docker_image','build_vercel_game','connect_platform','get_docker_upload_status','get_publish_status','inspect_game','prepare_release','publish_docker_game','publish_game','publish_link','upload_docker_image']);
+  assert.deepEqual((await client.listPrompts()).prompts.map(p=>p.name).sort(), ['choose_publish_path','prepare_docker_publish','prepare_github_publish','publish_local_artifacts']);
+  const githubPrompt = await client.getPrompt({name:'prepare_github_publish',arguments:{repo:'https://github.com/org/game',kind:'tag',ref:'v2.0',check_result:'缺少 package-lock.json'}});
+  const promptText = githubPrompt.messages[0].content.text;
+  assert.match(promptText,/v2.0/); assert.match(promptText,/缺少 package-lock.json/); assert.match(promptText,/保持此渠道/);
+  const localPrompt = await client.getPrompt({name:'publish_local_artifacts'});
+  assert.match(localPrompt.messages[0].content.text,/不让我回网页手动选文件/);
   const result=await client.callTool({name:'publish_game',arguments:{release,project_directory:dir}});
   assert.equal(result.isError,true);assert.equal(JSON.parse(result.content[0].text).code,'UNSUPPORTED_BUILD');
 });

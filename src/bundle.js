@@ -19,6 +19,7 @@ export async function bundleOutput(root,output) {
       if(file.length>240||file.includes('\\'))throw new Error('UNSUPPORTED_BUILD: 文件路径过长或不支持。');
       const path=join(output,file),stat=await lstat(path);
       if(stat.isSymbolicLink())throw new Error('UNSUPPORTED_BUILD: 构建产物中不支持符号链接。');
+      if(['api','server'].includes(entry.name)||/^server\.[cm]?[jt]s$/i.test(entry.name))throw new Error('VERCEL_OUTPUT_REQUIRED: 静态网页目录中包含服务端文件，请生成并发布完整 Vercel Build Output API v3 产物，不能忽略后端。');
       if(entry.name.startsWith('.')||['node_modules','api','server'].includes(entry.name)||(!relative&&entry.name==='1gp-kit')||/^(?:credentials|secrets)/i.test(entry.name)||/^(?:package(?:-lock)?\.json|(?:tsconfig.*|vercel|now)\.json|.*\.config\.[cm]?[jt]s|.*\.map)$/i.test(entry.name)){excluded.push(file);continue;}
       if(stat.isDirectory()){await walk(file);continue;}
       if(!stat.isFile()||!allowed.test(file)){excluded.push(file);continue;}
@@ -46,11 +47,11 @@ export async function bundleOutput(root,output) {
   }
   return {projectId:createHash('sha256').update(root).digest('hex').slice(0,32),files,size,excluded};
 }
-function runBuild(root,script,extraArgs=[]) {
+export function runBuild(root,script,extraArgs=[]) {
   return new Promise((resolve,reject)=>{
     // npm runs the project's build script locally. No platform token is passed.
     const env={...process.env};
-    for(const key of Object.keys(env))if(/^(?:ONEGP_|GAME_VERCEL_|SUPABASE_)/.test(key))delete env[key];
+    for(const key of Object.keys(env))if(/^(?:ONEGP_|GAME_VERCEL_|VERCEL_|SUPABASE_)/.test(key))delete env[key];
     const windows=process.platform==='win32';
     const npmCli=windows?[process.env.npm_execpath,join(dirname(process.execPath),'node_modules/npm/bin/npm-cli.js')].find(p=>p?.endsWith('npm-cli.js')&&existsSync(p)):undefined;
     if(windows&&!npmCli){reject(new Error('LOCAL_BUILD_FAILED: 无法定位 npm-cli.js，请使用包含 npm 的 Node.js 安装。'));return;}
