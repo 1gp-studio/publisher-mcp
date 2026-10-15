@@ -1,6 +1,6 @@
 # 1GP Publisher MCP
 
-在 Codex、Claude Code 等支持 MCP 的客户端里检查并发布当前游戏到 https://1gp-game-platform.vercel.app 。每个用户使用自己的平台账号，一次浏览器授权后即可发布。无需平台管理员的 Vercel 或 Supabase Token。
+在 Codex、Claude Code 等支持 MCP 的客户端里检查并发布当前游戏到 https://1gp-game-platform.vercel.app 。每个用户使用自己的平台账号，一次浏览器授权后即可发布。网页与受支持的服务端函数均由 1GP 统一托管，不需要用户登录 Vercel、提供 Vercel/Supabase Token、选择个人团队或新建个人云项目。
 
 ## 安装
 
@@ -13,7 +13,7 @@
 ```toml
 [mcp_servers.onegp]
 command = "npx"
-args = ["--yes", "github:1gp-studio/publisher-mcp#v0.5.0"]
+args = ["--yes", "github:1gp-studio/publisher-mcp#v0.6.0"]
 startup_timeout_sec = 60
 tool_timeout_sec = 600
 ```
@@ -27,7 +27,7 @@ tool_timeout_sec = 600
 在终端运行（`--scope project` 会写入当前游戏目录的 `.mcp.json`，只对这个项目生效；去掉则只对你本人生效）：
 
 ```sh
-claude mcp add onegp --scope project -- npx --yes github:1gp-studio/publisher-mcp#v0.5.0
+claude mcp add onegp --scope project -- npx --yes github:1gp-studio/publisher-mcp#v0.6.0
 ```
 
 或直接在游戏目录创建 `.mcp.json`：
@@ -35,7 +35,7 @@ claude mcp add onegp --scope project -- npx --yes github:1gp-studio/publisher-mc
 ```json
 {
   "mcpServers": {
-    "onegp": { "command": "npx", "args": ["--yes", "github:1gp-studio/publisher-mcp#v0.5.0"] }
+    "onegp": { "command": "npx", "args": ["--yes", "github:1gp-studio/publisher-mcp#v0.6.0"] }
   }
 }
 ```
@@ -63,6 +63,50 @@ claude mcp add onegp --scope project -- npx --yes github:1gp-studio/publisher-mc
 - 成功后更新日志才对玩家展示；失败记录留在作者历史中。作者可在历史页修改版本和说明，回退可用的旧 Vercel 部署或 Docker 镜像。回退不恢复玩家存档或外部数据；产物被云服务删除后不可恢复。外部链接不支持回退。
 - 升级后重启客户端，重新加载工具。下方参数示例用于检查；调用发布时须另加 `release`。
 
+## 完整游戏 Vercel 发布（v0.6.0）
+
+Vercel 发布同时包含网页和必要的服务端产物，只需 `connect_platform` 的 1GP 授权。**不要登录用户的 Vercel、读取其团队凭证、新建个人云项目或单独部署后端。** 1GP 使用平台自己的账号上传、部署和管理游戏前后端。
+
+普通 **Vite + `api/*.js` / `api/*.ts` 游戏，无需预先准备 Vercel 产物**：先调用本地构建工具：
+
+```json
+{"project_directory":"/absolute/game"}
+```
+
+上述参数用于 `build_vercel_game`。工具执行项目已有 `build` 脚本，用 esbuild 将固定路径（含嵌套路径）的 API 和依赖打包，兼容 Node `req/res` 函数或默认导出的 `http.Server`。保留 `vercel.json` 中受支持的同源 `rewrites`、函数 `maxDuration`/`memory`；支持 `/api/:path*` → `/api/index?__path=/api/:path*` 和 `/healthz` 等规则，原查询参数继续保留。不会执行 API 入口、读取或内联 `process.env` 的值，也不改游戏玩法与存储。`ws` 的可选原生加速模块使用其官方 JavaScript 回退，避免将本机二进制带入 Linux 函数。
+
+构建和完整校验成功后才写入工具管理的 `.1gp/vercel-output`，不会覆盖同名的未受管理目录；失败保留上次成功产物并清理临时目录。检查和发布可以自动识别该目录，也可明确使用工具返回的 `deployment_target` 和 `vercel_output_directory`。这一步不连接云端、不上传、不发布。之后调用 `prepare_release` 并提供版本说明，再 `publish_game`。
+
+其他 npm 静态前端可给 `build_vercel_game` 传 `frontend_output_directory` 和可选的 `build_script`；仅给目录则使用已有前端产物。Next/其他 SSR、动态 API 文件名（如 `[id].ts`）、原生依赖、依赖 `import.meta.url` 的入口或其他不受支持配置会明确停止，需要专用框架适配器或 1GP Docker。
+
+已有完整产物：
+
+```json
+{"project_directory":"/absolute/game","deployment_target":"vercel","vercel_output_directory":".vercel/output"}
+```
+
+本地已有适配器构建脚本：
+
+```json
+{"project_directory":"/absolute/game","deployment_target":"vercel","build_script":"build:game"}
+```
+
+参数适用于 `inspect_game` 和 `publish_game`；发布另加 `release`，更新原游戏可加 `gameSlug`。默认输出为 `.vercel/output`，也可指定项目内其他目录；`vercel_output_directory` 不能与静态模式的 `output_directory` 混用。不传参数时自动识别已有 `.vercel/output/config.json`。
+
+完整产物遵循 [Vercel Build Output API v3](https://vercel.com/docs/build-output-api)，支持：
+
+- `config.json` 的版本、固定同源路由、静态资源覆盖规则和框架元数据。捕获变量可放在路由目标的查询参数里。
+- `static/` 内的网页、浏览器脚本和资源。
+- `functions/<name>.func/` 内的 Node.js 22/24 函数、直接子级 `.vc-config.json`、入口和必要依赖；保留函数所需的 `node_modules`、`package.json` 等运行文件。API 和常规 SSR 与前端在同一部署中运行，SSR 根路由不要求静态 `index.html`。
+
+每个函数必须自包含，不支持引用输出外源码的非空 `filePathMap`。产物内指向同一输出目录的符号链接会安全展开，外部链接和循环链接拒绝。当前不支持 Edge、ISR/prerender、images、wildcard、crons、services/daemons 或动态 middleware；检测到会明确报错，不删除必要配置后继续发布。函数支持 Linux x86_64、最多 2048 MiB 内存、300 秒执行时间和单区域。需要常驻进程、WebSocket、进程内多人房间或其他运行能力时使用下方 **1GP Docker 托管**，不要为了部署自动改写玩法、存储方式或删除后端。
+
+检查只读取项目，不运行构建。发现 API、server 或 SSR 而没有完整产物时返回 `VERCEL_OUTPUT_REQUIRED`；普通 Vite/API 项目调用 `build_vercel_game`，其他项目使用无需 Vercel 登录的专用框架适配器。仅执行 `next build` 不代表已生成此格式；不要上传 `.next` 目录或把后端塞进静态目录。MCP 不执行 Vercel CLI、创建云项目或修改游戏；其他包管理器可先在本地构建，再上传已有产物。发布时如指定完整产物构建脚本，必须生成新的 `config.json`，否则停止；明确上传已有产物时省略 `build_script`。
+
+完整产物上限 **64 MiB、10000 个文件，单文件 16 MiB，配置 JSON 100 KiB**。工具先校验完整包，再分批上传（每批最多 200 文件、4 MiB JSON）；大文件压缩后仍无法放入一批时须缩小或拆分资源。平台返回 30 分钟有效、绑定当前账号和文件内容的回执，最终发布发送文件引用与必要配置；发布清单及版本说明合计最多 4300 KiB，超限在上传前停止。失败或响应不确定时不会自动重试。平台无需安装游戏依赖或执行云端构建。
+
+source map 不上传；检测到凭据、私钥、`.env` 等文件会拒绝。浏览器资源对玩家公开，服务端产物提交给 1GP 并在服务端运行，不作为静态网页资源公开。不要把秘密写入产物；函数配置仅接受官方默认的空 `environment: {}`，不接受任何环境变量值、`env` 或 `envVarsInUse`。
+
 ## 通用静态网页发布
 
 发布不要求 Vite。平台需要的是能直接由浏览器运行的静态网页目录，根目录含 `index.html`。支持四种流程：
@@ -74,7 +118,7 @@ claude mcp add onegp --scope project -- npx --yes github:1gp-studio/publisher-mc
 | 使用 npm 脚本导出网页的项目 | 指定 `build_script` 和 `output_directory` | 在本地运行项目自己的脚本，不附加 Vite 参数，然后打包产物 |
 | Vite 项目 | 不提供额外参数 | 在本地运行 build 脚本，使用独立临时输出目录；完成后清理 |
 
-例如 Webpack / Parcel / Astro 等项目可以使用其自身的静态输出；Next.js 必须先配置并生成静态导出，再选择 `out`，不能上传 `.next` 服务端目录。目录名称取决于项目配置，不会仅根据框架名称猜测。依赖服务端的项目可由团队账号使用下方 Docker 托管流程；已有托管地址也可以调用 `publish_link`。使用 pnpm、yarn 或其他构建工具时，可让本地 AI 工具先构建，再选择输出目录发布；MCP 内置脚本执行器只运行 npm 脚本。
+例如 Webpack / Parcel / Astro 等项目可以使用其自身的静态输出；Next.js 必须先配置并生成静态导出，再选择 `out`，不能上传 `.next` 服务端目录。目录名称取决于项目配置，不会仅根据框架名称猜测。需要 API/SSR 的游戏使用上方完整 Vercel 产物流程，常驻进程游戏可由团队账号使用下方 Docker 托管流程；已有托管地址也可以调用 `publish_link`。使用 pnpm、yarn 或其他构建工具时，可让本地 AI 工具先构建，再选择输出目录发布；MCP 内置脚本执行器只运行 npm 脚本。
 
 已有产物：
 
@@ -104,30 +148,35 @@ Godot 保留专用流程：读取 `project.godot` 和 Web 导出预设，上传�
 
 Godot 也使用同一个 `gameSlug` 参数，不需要 `output_directory`。平台只允许更新当前账号拥有的、本地上传的游戏；目标不存在、属于他人或来自 GitHub / 外部链接时会报错，不会退回到新建游戏。游戏页面标识和玩家数据保持不变。不指定 `gameSlug` 时，仍按原有文件夹规则发布。此参数需使用 MCP v0.3.1 或更新版本，以及支持游戏转移的平台版本；旧版 MCP 不会发送更新目标。
 
-网页产物限 3 MiB / 300 文件（Godot 不含引擎）。支持 HTML、JS、CSS、JSON、字体、图片、音视频、WASM、glTF、data/bin/atlas、XML 和 webmanifest。source map、隐藏文件、依赖及常见项目配置不上传；内联 source map、检测到的凭证或符号链接导致拒绝。更大游戏可自行托管产物再接入链接。平台直接部署，不安装依赖或执行构建。
+纯静态网页产物限 3 MiB / 300 文件（Godot 不含引擎）；完整 Vercel 产物使用上方独立限制。支持 HTML、JS、CSS、JSON、字体、图片、音视频、WASM、glTF、data/bin/atlas、XML 和 webmanifest。source map、隐藏文件、依赖及常见项目配置不上传；内联 source map、检测到的凭证或符号链接导致拒绝。更大游戏可自行托管产物再接入链接。平台直接部署，不安装依赖或执行构建。
 
-**浏览器 JavaScript 和资源会提供给平台及玩家。纯 HTML/JS 游戏的这些文件本身就是可发布代码，不能声称它们仍然私密。** 不要将私密内容放入网页目录或通过构建复制进产物；过滤无法识别所有私密文件。只在你信任的项目上运行构建脚本。上传的是明确选择的网页目录，不是整个框架源码项目。
+**浏览器 JavaScript 和资源会提供给平台及玩家。纯 HTML/JS 游戏的这些文件本身就是可发布代码，不能声称它们仍然私密。** 不要将私密内容放入网页目录或通过构建复制进产物；过滤无法识别所有私密文件。只在你信任的项目上运行构建脚本。静态模式上传明确选择的网页目录；完整 Vercel 模式上传完整运行产物，两种模式都不上传整个框架源码项目。
 
 ## 工具
 
 | 工具 | 用途 |
 | --- | --- |
 | prepare_release(project_directory, gameSlug?, docker_project?) | 对比上次成功发布并获取版本建议，不构建或发布 |
-| inspect_game(project_directory, output_directory?, build_script?) | 只读检测当前绝对路径，返回支持情况及构建方式（web-static / godot-web） |
+| build_vercel_game(project_directory, frontend_output_directory?, build_script?) | 在本地将 Vite/npm 静态前端和 API 打包成完整 Vercel 产物，无需云登录，不上传或部署 |
+| inspect_game(project_directory, deployment_target?, vercel_output_directory?, output_directory?, build_script?) | 只读检测当前绝对路径，返回支持情况及构建方式（vercel-output / web-static / godot-web） |
 | connect_platform() | 建立当前客户端连接，返回用户授权网址 |
-| publish_game(project_directory, title?, description?, output_directory?, build_script?, gameSlug?) | 检测后发布；可指定原游戏标识，在转移所有权或移动文件夹后继续更新同一游戏 |
+| publish_game(project_directory, title?, description?, deployment_target?, vercel_output_directory?, output_directory?, build_script?, gameSlug?) | 检测后发布；可指定原游戏标识，在转移所有权或移动文件夹后继续更新同一游戏 |
 | publish_link(url, project_directory?, title?, description?) | 把已部署的可玩 HTTPS 网址发布为 1GP 游戏页，不构建；同一网址再次提交会更新同一作品 |
 | get_publish_status(build_id) | 查询当前账号自己的构建和试玩网址 |
 
-需要指定输出时返回 `OUTPUT_REQUIRED`。错误包含 `LOCAL_BUILD_FAILED`、`UNSUPPORTED_BUILD`、`POTENTIAL_SECRET`、`AUTH_REQUIRED`，`publish_link` 另有 `INVALID_URL`、`TITLE_REQUIRED`；连不上平台时为 `NETWORK_ERROR`。遇到网络不确定的发布结果不要自动重复提交，可到网站「我的发布」查看。
+需要指定静态输出时返回 `OUTPUT_REQUIRED`，需要完整服务端产物时返回 `VERCEL_OUTPUT_REQUIRED`。错误包含 `LOCAL_BUILD_FAILED`、`UNSUPPORTED_BUILD`、`POTENTIAL_SECRET`、`AUTH_REQUIRED`，`publish_link` 另有 `INVALID_URL`、`TITLE_REQUIRED`；连不上平台时为 `NETWORK_ERROR`。遇到网络不确定的发布结果不要自动重复提交，可到网站「我的发布」查看。
 
 ## 授权与限制
 
 本地凭证保存在 `~/.config/1gp-studio/`，目录权限 0700，文件权限 0600。平台仅保存 SHA-256 哈希。凭证不会通过工具结果或浏览器 URL 输出。授权 90 天有效，仅允许发布和查询自己的构建；在网站「我的发布」撤销后，再运行 connect_platform 可重新连接。
 
-平台目前限制全站同时 2 个构建、每个账号最多 50 个作品，不设每日次数限制。账号邮箱验证由 Supabase 负责；平台管理员必须配置生产邮件服务，才能支持组织外用户收取登录邮件。Vercel 的套餐、GitHub 访问授权及构建限制仍适用。
+平台目前限制全站同时 2 个构建、每个账号最多 50 个作品，不设每日次数限制。账号邮箱验证由 Supabase 负责；平台管理员必须配置生产邮件服务，才能支持组织外用户收取登录邮件。1GP 托管团队的 Vercel 套餐及运行限制仍适用；不占用用户个人 Vercel 账号。GitHub 来源继续遵守仓库授权与构建限制。
 
 开发时可使用 `ONEGP_PLATFORM_URL` 指向另一 HTTPS 平台，或本机 HTTP localhost/127.0.0.1；凭证按平台分别保存。测试运行 `npm test`，包括真实 MCP stdio 客户端集成测试。
+
+## v0.6.0 发布顺序
+
+先部署支持 `vercel-output`、文件分批上传与回执校验的平台，再发布 MCP `v0.6.0` tag，最后更新客户端配置并重启。旧静态、Godot、Docker、`release` 和 `gameSlug` 协议继续兼容。平台与 tag 发布前使用本地源码验证；修改版本号本身不代表远程版本已经发布。
 
 ## v0.4.0
 
