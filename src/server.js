@@ -4,6 +4,7 @@ import { prepareRelease, sourceSnapshot } from './releases.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
+import packageInfo from '../package.json' with { type: 'json' };
 import { inspectGame,godotMetadata,file } from './inspect.js';
 import { realpath } from 'node:fs/promises';
 import { isAbsolute } from 'node:path';
@@ -15,7 +16,7 @@ import { bundleGodotExport } from './godot.js';
 import { buildDockerImage, uploadDockerImage, dockerUploadStatus } from './docker.js';
 import { Platform } from './platform.js';
 const platform=new Platform();
-const server=new McpServer({name:'1gp-publisher',version:'0.6.0'});
+const server=new McpServer({name:'1gp-publisher',version:packageInfo.version});
 const promptResult = text => ({ messages: [{ role: 'user', content: { type: 'text', text } }] });
 for (const [name, description, text] of [
   ['choose_publish_path', 'Inspect the local project and choose a suitable 1GP-managed publishing channel.', automaticPublishPrompt],

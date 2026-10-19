@@ -1,6 +1,7 @@
 import { test } from 'node:test';
+import { testSymlink } from './helpers/symlink.js';
 import assert from 'node:assert/strict';
-import { mkdtemp,writeFile,rm,mkdir,symlink,stat } from 'node:fs/promises';
+import { mkdtemp,writeFile,rm,mkdir,stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join,resolve,dirname } from 'node:path';
 import { createHash,randomBytes } from 'node:crypto';
@@ -104,17 +105,26 @@ test('unsupported platform features fail explicitly rather than being discarded'
   const root=await fixture(t,{...gameFiles,[prefix+'functions/api/state.prerender-config.json']:'{"expiration":60}'});
   await assert.rejects(()=>bundleVercelGame(root),/prerender/);
 });
-test('safe internal function links materialize while external links, loops and credentials are rejected',async t=>{
+test('safe internal function directory links materialize',async t=>{
   const root=await fixture(t),fn=join(root,prefix+'functions/api/state.func');
-  await symlink(fn,join(root,prefix+'functions/other.func'),process.platform==='win32'?'junction':'dir');
+  if(!await testSymlink(t,fn,join(root,prefix+'functions/other.func'),process.platform==='win32'?'junction':'dir'))return;
   const bundle=await bundleVercelGame(root);assert.equal(bundle.functionCount,2);
   assert.ok(bundle.files.some(file=>file.file===prefix+'functions/other.func/node_modules/tiny-lib/index.js'));
+});
+test('external file links are rejected',async t=>{
+  const root=await fixture(t),fn=join(root,prefix+'functions/api/state.func');
   const outside=await fixture(t,{'leak.js':'private'});
-  await symlink(join(outside,'leak.js'),join(fn,'leak.js'));
+  if(!await testSymlink(t,join(outside,'leak.js'),join(fn,'leak.js')))return;
   await assert.rejects(()=>bundleVercelGame(root),/同一输出目录/);
-  await rm(join(fn,'leak.js'));await symlink(fn,join(fn,'loop'),process.platform==='win32'?'junction':'dir');
+});
+test('function directory link cycles are rejected',async t=>{
+  const root=await fixture(t),fn=join(root,prefix+'functions/api/state.func');
+  if(!await testSymlink(t,fn,join(fn,'loop'),process.platform==='win32'?'junction':'dir'))return;
   await assert.rejects(()=>bundleVercelGame(root),/循环/);
-  await rm(join(fn,'loop'));await writeFile(join(fn,'.env.local'),'SECRET=value');
+});
+test('function credentials are rejected',async t=>{
+  const root=await fixture(t),fn=join(root,prefix+'functions/api/state.func');
+  await writeFile(join(fn,'.env.local'),'SECRET=value');
   await assert.rejects(()=>bundleVercelGame(root),/POTENTIAL_SECRET/);
 });
 test('full outputs exclude source maps and enforce size/config limits',async t=>{

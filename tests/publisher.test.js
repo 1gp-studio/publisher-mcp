@@ -1,4 +1,5 @@
 import { test } from 'node:test';
+import { testSymlink } from './helpers/symlink.js';
 import assert from 'node:assert/strict';
 import { mkdtemp,writeFile,rm,stat,mkdir,readdir,symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -50,14 +51,17 @@ test('the store kit folder at the top is never uploaded with the game',async t=>
   assert.deepEqual(bundle.files.map(f=>f.file),['index.html','levels/1gp-kit/a.json']);
   assert.ok(bundle.excluded.includes('1gp-kit'));
 });
-test('output validation rejects inline maps, credentials, symlinks and oversized exports',async t=>{
+test('output validation rejects inline maps, credentials and oversized exports',async t=>{
   const dir=await fixture(t,{'index.html':'game','game.js':'//# sourceMappingURL=data:application/json;base64,e30='});
   await assert.rejects(bundleOutput(dir,dir),/source map/);
   await writeFile(join(dir,'game.js'),'-----BEGIN PRIVATE KEY-----');
   await assert.rejects(bundleOutput(dir,dir),/POTENTIAL_SECRET/);
   await writeFile(join(dir,'game.js'),'x'.repeat(3*1024*1024));
   await assert.rejects(bundleOutput(dir,dir),/3 MB/);
-  await rm(join(dir,'game.js'));await symlink(join(dir,'index.html'),join(dir,'game.js'));
+});
+test('output validation rejects file symbolic links',async t=>{
+  const dir=await fixture(t,{'index.html':'game'});
+  if(!await testSymlink(t,join(dir,'index.html'),join(dir,'game.js')))return;
   await assert.rejects(bundleOutput(dir,dir),/符号链接/);
 });
 test('pairing exposes only a hash, stores private token, and authenticates API requests',async t=>{

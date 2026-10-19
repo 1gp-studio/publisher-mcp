@@ -1,5 +1,5 @@
 
-const setup = '请按 https://github.com/1gp-studio/publisher-mcp 的说明安装或升级 1GP MCP 到 v0.6.0，连接我的 1GP 账号，在当前本地游戏项目中操作。';
+const setup = '请按 https://github.com/1gp-studio/publisher-mcp 的说明安装或升级 1GP MCP 到 v0.6.2，连接我的 1GP 账号，在当前本地游戏项目中操作。';
 const hosting = '所有新增托管都使用 1GP 的资源；不要要求我登录 Vercel、AWS 或 ECR，不要创建个人云项目或索取云密钥。不要上传凭证、无关源码或 source map。';
 const verify = '发布前调用 prepare_release，依据实际修改准备版本说明；发布后等待任务 ready 或 failed，检查网页和必要接口，给出链接及未验证项。部署成功不代表多人玩法已验证，不要求多人端到端测试作为发布门槛。';
 

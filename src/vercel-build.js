@@ -125,20 +125,15 @@ async function bundleFunction(root,entry,directory,settings) {
   }catch {throw new Error(`LOCAL_BUILD_FAILED: 无法将 ${entry.file} 打包为自包含 Node.js 函数。请确认已安装依赖；动态 require、原生模块或未打包的运行资源需要项目专用适配器/1GP Docker。没有发布游戏。`);}
   const builtins=new Set(builtinModules.flatMap(name=>[name,'node:'+name]));
   for(const output of Object.values(result.metafile.outputs))for(const item of output.imports)if(item.external&&!builtins.has(item.path))fail(`函数 ${entry.file} 仍依赖未打包模块；请生成自包含产物。`);
-  // Only imports are bundled; files read at run time are not. So refuse a function when
-  // - the project's own code uses the file system or builds paths from __dirname / process.cwd(), or
-  // - a dependency reads files next to itself (fs plus __dirname), which breaks once bundled.
-  const fsModule=/(?:require\s*\(\s*|from\s*|import\s*\(\s*)['"](?:node:)?(?:fs|fs\/promises|graceful-fs|fs-extra)['"]/;
-  const ownPath=/\b(?:__dirname|__filename)\b|process\.cwd\s*\(|import\.meta\.(?:url|dirname|filename)\b/;
-  const readsFiles=/\b(?:readFileSync|readFile|createReadStream|readdirSync|readdir|opendirSync|opendir|openSync|readSync|readvSync|existsSync|statSync|accessSync)\s*\(|\.(?:open|read)\s*\(/;
-  for(const input of Object.keys(result.metafile.inputs)) {
-    if(!/\.[cm]?[jt]sx?$/.test(input))continue;
-    const dependency=/(^|[\\/])node_modules[\\/]/.test(input);
-    const source=await readFile(join(root,input),'utf8').catch(()=>'');
-    const usesFs=fsModule.test(source);
-    const found=dependency?usesFs&&readsFiles.test(source)&&/\b(?:__dirname|__filename)\b/.test(source)
-      :usesFs||ownPath.test(source);
-    if(found)fail(`函数 ${entry.file} 用到的 ${input.split('\\').join('/')} 会在运行时读取文件，这些文件不会被打包，部署后会出错。请把数据改成 import 引入（例如 import levels from './levels.json'），或使用项目专用适配器 / 1GP Docker。`);
+  // esbuild records the entire resolved dependency graph, including packages and re-exports.
+  // It does not trace runtime files. Refuse filesystem access anywhere in that graph instead of
+  // guessing which read methods/paths are used together in an individual source file. Runtime
+  // module/process loaders can introduce files outside the graph, so they need a dedicated adapter
+  // too. Static JSON imports and ws's explicitly materialized optional fallbacks remain supported.
+  const untracedRuntime=new Set(['fs','fs/promises','module','child_process','worker_threads','vm']);
+  for(const [input,metadata] of Object.entries(result.metafile.inputs)) {
+    const unsupported=metadata.imports.find(item=>item.external&&untracedRuntime.has(item.path.replace(/^node:/,'')));
+    if(unsupported)fail(`函数 ${entry.file} 的依赖 ${input.split('\\').join('/')} 使用 ${unsupported.path}，可能在运行时读取文件或加载未打包代码，无法确认产物完整。请把数据改成 import 引入（例如 import levels from './levels.json'），或使用项目专用适配器 / 1GP Docker。`);
   }
   // Do not execute the game during compilation or substitute process.env.
   // This wrapper preserves both Node req/res handlers and exported http.Server.

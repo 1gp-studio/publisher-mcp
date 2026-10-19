@@ -1,5 +1,7 @@
 import { lstat,readFile,readdir } from 'node:fs/promises';
 import { resolve,relative,isAbsolute,join,sep } from 'node:path';
+import { validateBuildScript } from './build-script.js';
+export { validateBuildScript } from './build-script.js';
 
 export async function webPackage(root) {
   try {
@@ -10,37 +12,6 @@ export async function webPackage(root) {
     if(error.code==='ENOENT')return null;
     throw new Error('UNSUPPORTED_BUILD: 无法读取有效的 package.json。');
   }
-}
-// Script names a command line may run through npm, pnpm or yarn. Every word after `run` (or, for
-// pnpm/yarn, after the tool) that is not a flag is treated as a possible name; names that are not
-// scripts are simply skipped, so guessing too many is safe. npm's test/start/stop/restart run hooks too.
-function nestedScripts(command) {
-  const names=[];
-  for(const segment of command.split(/&&|\|\||[;&|\n()]/)) {
-    const words=segment.trim().split(/\s+/).filter(Boolean);
-    const at=words.findIndex(word=>/^(?:\S*[\\/])?(?:npm|pnpm|yarn)(?:\.cmd|\.exe)?$/i.test(word));
-    if(at<0)continue;
-    const tool=words[at].toLowerCase().replace(/^.*[\\/]/,'').replace(/\.(?:cmd|exe)$/,''),rest=words.slice(at+1);
-    const end=rest.indexOf('--'),args=end<0?rest:rest.slice(0,end);
-    const run=args.findIndex(word=>['run','run-script','rum','urn'].includes(word));
-    const candidates=(run>=0?args.slice(run+1):tool==='npm'?args.filter(word=>['test','t','tst','start','stop','restart'].includes(word)).map(word=>word.startsWith('t')?'test':word):args).filter(word=>!word.startsWith('-'));
-    names.push(...candidates.filter(word=>/^[A-Za-z0-9:_-]+$/.test(word)));
-  }
-  return names;
-}
-export function validateBuildScript(pkg,script) {
-  if(script===undefined)return;
-  if(!/^[A-Za-z0-9:_-]{1,80}$/.test(script)||typeof pkg?.scripts?.[script]!=='string'||!pkg.scripts[script].trim())throw new Error('UNSUPPORTED_BUILD: build_script 必须是 package.json 中已有的 npm 脚本名称。');
-  const seen=new Set();
-  function inspect(name) {
-    if(seen.has(name))return;seen.add(name);
-    const command=pkg.scripts[name];if(typeof command!=='string')return;
-    if(/(?:^|[\s;&|])(?:\S*[\\/])?(?:vercel|vc)(?:@[^\s;&|]+)?(?:\s|$)/i.test(command))throw new Error('UNSUPPORTED_BUILD: 构建脚本不能调用 Vercel CLI。请使用无需 Vercel 登录或云项目的本地框架适配器生成 Build Output API v3 产物，由 1GP 统一部署。');
-    // Nested scripts run their own pre/post hooks too. Read each command of the line word by word,
-    // so flags anywhere (npm --silent run x, npm run --if-present x, pnpm -s x) cannot hide a name.
-    for(const name of nestedScripts(command))for(const hook of [`pre${name}`,name,`post${name}`])inspect(hook);
-  }
-  for(const name of [`pre${script}`,script,`post${script}`])inspect(name);
 }
 // Accept only a literal exported config: comments, strings mentioning output,
 // spreads, getters and dynamic expressions cannot prove a static-only build.

@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, writeFile, rm, symlink, stat } from 'node:fs/promises';
+import { mkdtemp, writeFile, rm, stat } from 'node:fs/promises';
+import { testSymlink } from './helpers/symlink.js';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { buildDockerImage, dockerProject, requiredIgnores, uploadDockerImage, validateUploadTarget, dockerUploadStatus } from '../src/docker.js';
@@ -31,7 +32,11 @@ test('upload streams only the archive, never bearer credentials, and returns a r
  assert.equal(result.upload_id,id);assert.equal(result.state,'importing');assert.equal(calls.length,2);assert.equal(calls[0][1].body.size,2048);
  const interrupted=await uploadDockerImage(platform,path,'game',{send:async()=>{throw Error('token-secret-must-not-leak');}});
  assert.equal(interrupted.upload_id,id);assert.equal(interrupted.code,'UPLOAD_UNCERTAIN');assert.ok(!JSON.stringify(interrupted).includes('token-secret'));
- await symlink(path,join(root,'link.tar'));await assert.rejects(uploadDockerImage(platform,join(root,'link.tar'),'game'),/non-symlink/);
+});
+test('Docker archive uploads reject symbolic links before contacting the platform',async t=>{
+ const root=await fixture(t),path=join(root,'game.tar');await writeFile(path,Buffer.alloc(2048));
+ if(!await testSymlink(t,path,join(root,'link.tar')))return;
+ await assert.rejects(uploadDockerImage({request:async()=>assert.fail('must not upload a link')},join(root,'link.tar'),'game'),/non-symlink/);
 });
 test('signed uploads cannot redirect to arbitrary hosts or object keys',()=>{
  for(const url of ['https://evil.example/','http://1gp-game-uploads-612153676415-dev.s3.us-east-1.amazonaws.com/','https://x@1gp-game-uploads-612153676415-dev.s3.us-east-1.amazonaws.com/','https://1gp-game-uploads-612153676415-dev.s3.us-east-1.amazonaws.com/other'])assert.throws(()=>validateUploadTarget({...signed,url}));

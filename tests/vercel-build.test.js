@@ -117,6 +117,7 @@ test('adapter refuses unowned output and exposes a working MCP build tool withou
   await assert.rejects(()=>buildVercelGame(root),/不会覆盖/);assert.equal(await readFile(join(root,'.1gp/vercel-output/keep.txt'),'utf8'),'user file');
   const clean=await fixture(t);
   const client=new Client({name:'adapter-test',version:'1'});await client.connect(new StdioClientTransport({command:process.execPath,args:[resolve('src/server.js')],stderr:'pipe'}));t.after(()=>client.close());
+  assert.equal(client.getServerVersion().version,JSON.parse(await readFile(new URL('../package.json',import.meta.url),'utf8')).version);
   const result=await client.callTool({name:'build_vercel_game',arguments:{project_directory:clean}});
   assert.equal(result.isError,false,JSON.stringify(result));const built=JSON.parse(result.content[0].text);assert.equal(built.vercel_output_directory,'.1gp/vercel-output');
   const checked=await client.callTool({name:'inspect_game',arguments:{project_directory:clean,deployment_target:built.deployment_target,vercel_output_directory:built.vercel_output_directory}});assert.equal(checked.isError,false);
@@ -125,7 +126,7 @@ test('functions that read files at run time are refused instead of shipping with
   const root=await fixture(t,{'public/index.html':'<p>built</p>','levels.json':'[1,2,3]','api/index.ts':'export default function(_req:any,res:any){res.end("ok");}',
     'api/nested/ping.ts':`import {readFileSync} from 'node:fs';export default function(_req:any,res:any){res.end(readFileSync(process.cwd()+'/levels.json','utf8'));}`});
   await assert.rejects(()=>buildVercelGame(root,{frontendOutputDirectory:'public'}),/在运行时读取文件/);
-  // Any other way to read a file is refused too, in the project's code or in a dependency that reads files beside itself.
+  // Other static filesystem imports are refused too, in the project and its dependencies.
   await writeFile(join(root,'api/nested/ping.ts'),`import {openSync,readSync} from 'node:fs';export default function(_req:any,res:any){const b=Buffer.alloc(9);readSync(openSync('levels.json','r'),b);res.end(b);}`);
   await assert.rejects(()=>buildVercelGame(root,{frontendOutputDirectory:'public'}),/在运行时读取文件/);
   // (A package folder outside the shared node_modules link, so the fixture never writes into it.)
@@ -134,7 +135,17 @@ test('functions that read files at run time are refused instead of shipping with
   await writeFile(join(root,'lib/node_modules/levels-pkg/index.js'),`const fs=require('fs'),path=require('path');module.exports=()=>fs.readFileSync(path.join(__dirname,'data.json'),'utf8');`);
   await writeFile(join(root,'api/nested/ping.ts'),`import levels from '../../lib/node_modules/levels-pkg/index.js';export default function(_req:any,res:any){res.end(levels());}`);
   await assert.rejects(()=>buildVercelGame(root,{frontendOutputDirectory:'public'}),/在运行时读取文件/);
+  // The path and reader may be in different dependency modules, and the reader may be aliased.
+  await writeFile(join(root,'lib/node_modules/levels-pkg/index.js'),`const path=require('node:path'),load=require('./load.cjs');module.exports=()=>load(path.join(__dirname,'data.json'));`);
+  await writeFile(join(root,'lib/node_modules/levels-pkg/load.cjs'),`const {readFileSync:load}=require('node:fs');module.exports=file=>load(file,'utf8');`);
+  await assert.rejects(()=>buildVercelGame(root,{frontendOutputDirectory:'public'}),/load\.cjs.*node:fs.*无法确认产物完整/);
+  await writeFile(join(root,'lib/node_modules/levels-pkg/load.cjs'),`const storage=require('node:fs/promises');module.exports=file=>storage.readFile(file,'utf8');`);
+  await assert.rejects(()=>buildVercelGame(root,{frontendOutputDirectory:'public'}),/node:fs\/promises.*无法确认产物完整/);
+  await writeFile(join(root,'lib/node_modules/levels-pkg/load.cjs'),`const {createRequire}=require('node:module');module.exports=file=>createRequire(file)('./data.json');`);
+  await assert.rejects(()=>buildVercelGame(root,{frontendOutputDirectory:'public'}),/node:module.*无法确认产物完整/);
   // Importing the data bundles it, so the same function builds.
   await writeFile(join(root,'api/nested/ping.ts'),`import levels from '../../levels.json';export default function(_req:any,res:any){res.end(JSON.stringify(levels));}`);
-  assert.equal((await buildVercelGame(root,{frontendOutputDirectory:'public'})).ready,true);
+  const built=await buildVercelGame(root,{frontendOutputDirectory:'public'});assert.equal(built.ready,true);
+  const handler=require(join(root,built.vercel_output_directory,'functions/api/nested/ping.func/index.cjs'));
+  handler({}, {end:value=>assert.equal(value,'[1,2,3]')});
 });
