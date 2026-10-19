@@ -13,7 +13,7 @@
 ```toml
 [mcp_servers.onegp]
 command = "npx"
-args = ["--yes", "github:1gp-studio/publisher-mcp#v0.6.0"]
+args = ["--yes", "github:1gp-studio/publisher-mcp#v0.6.1"]
 startup_timeout_sec = 60
 tool_timeout_sec = 600
 ```
@@ -27,7 +27,7 @@ tool_timeout_sec = 600
 在终端运行（`--scope project` 会写入当前游戏目录的 `.mcp.json`，只对这个项目生效；去掉则只对你本人生效）：
 
 ```sh
-claude mcp add onegp --scope project -- npx --yes github:1gp-studio/publisher-mcp#v0.6.0
+claude mcp add onegp --scope project -- npx --yes github:1gp-studio/publisher-mcp#v0.6.1
 ```
 
 或直接在游戏目录创建 `.mcp.json`：
@@ -35,7 +35,7 @@ claude mcp add onegp --scope project -- npx --yes github:1gp-studio/publisher-mc
 ```json
 {
   "mcpServers": {
-    "onegp": { "command": "npx", "args": ["--yes", "github:1gp-studio/publisher-mcp#v0.6.0"] }
+    "onegp": { "command": "npx", "args": ["--yes", "github:1gp-studio/publisher-mcp#v0.6.1"] }
   }
 }
 ```
@@ -173,6 +173,10 @@ Godot 也使用同一个 `gameSlug` 参数，不需要 `output_directory`。平�
 平台目前限制全站同时 2 个构建、每个账号最多 50 个作品，不设每日次数限制。账号邮箱验证由 Supabase 负责；平台管理员必须配置生产邮件服务，才能支持组织外用户收取登录邮件。1GP 托管团队的 Vercel 套餐及运行限制仍适用；不占用用户个人 Vercel 账号。GitHub 来源继续遵守仓库授权与构建限制。
 
 开发时可使用 `ONEGP_PLATFORM_URL` 指向另一 HTTPS 平台，或本机 HTTP localhost/127.0.0.1；凭证按平台分别保存。测试运行 `npm test`，包括真实 MCP stdio 客户端集成测试。
+
+## v0.6.1
+
+只改客户端，平台无需改动。构建检查补强：构建脚本里嵌套调用的脚本（含 `npm --silent run x`、pnpm/yarn、npm test/start）连同它们的 pre/post 钩子一起检查，藏在里面的 Vercel 发布命令会被拦下；API 函数如果在运行时读取文件（项目代码使用文件系统或用 `__dirname`/`process.cwd()` 拼路径，或依赖包读取自己旁边的文件），构建会直接报错并提示改成 import 引入，不再显示成功后上线才出错。
 
 ## v0.6.0 发布顺序
 

@@ -139,6 +139,13 @@ test('local scripts produce fresh complete output without user Vercel credential
   await assert.rejects(()=>bundleVercelGame(root,options),/未生成新的/);
   await writeFile(join(root,'package.json'),JSON.stringify({scripts:{'build:game':'npx vercel build'}}));
   assert.match((await inspectGame(root,options)).reason,/不能调用 Vercel CLI/);
+  // Hooks of nested scripts run too (npm run compile runs precompile).
+  await writeFile(join(root,'package.json'),JSON.stringify({scripts:{'build:game':'npm run compile',compile:'node build.cjs',precompile:'vercel --prod'}}));
+  assert.match((await inspectGame(root,options)).reason,/不能调用 Vercel CLI/);
+  await writeFile(join(root,'package.json'),JSON.stringify({scripts:{'build:game':'npm --silent run compile',compile:'node build.cjs',precompile:'vercel --prod'}}));
+  assert.match((await inspectGame(root,options)).reason,/不能调用 Vercel CLI/);
+  await writeFile(join(root,'package.json'),JSON.stringify({scripts:{'build:game':'pnpm --silent compile',compile:'node build.cjs',postcompile:'npx -y vercel deploy'}}));
+  assert.match((await inspectGame(root,options)).reason,/不能调用 Vercel CLI/);
 });
 test('upload batches stay bounded, gzip large files and preserve only configuration data in receipts',async()=>{
   const files=[

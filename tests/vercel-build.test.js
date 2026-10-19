@@ -121,3 +121,20 @@ test('adapter refuses unowned output and exposes a working MCP build tool withou
   assert.equal(result.isError,false,JSON.stringify(result));const built=JSON.parse(result.content[0].text);assert.equal(built.vercel_output_directory,'.1gp/vercel-output');
   const checked=await client.callTool({name:'inspect_game',arguments:{project_directory:clean,deployment_target:built.deployment_target,vercel_output_directory:built.vercel_output_directory}});assert.equal(checked.isError,false);
 });
+test('functions that read files at run time are refused instead of shipping without those files',async t=>{
+  const root=await fixture(t,{'public/index.html':'<p>built</p>','levels.json':'[1,2,3]','api/index.ts':'export default function(_req:any,res:any){res.end("ok");}',
+    'api/nested/ping.ts':`import {readFileSync} from 'node:fs';export default function(_req:any,res:any){res.end(readFileSync(process.cwd()+'/levels.json','utf8'));}`});
+  await assert.rejects(()=>buildVercelGame(root,{frontendOutputDirectory:'public'}),/在运行时读取文件/);
+  // Any other way to read a file is refused too, in the project's code or in a dependency that reads files beside itself.
+  await writeFile(join(root,'api/nested/ping.ts'),`import {openSync,readSync} from 'node:fs';export default function(_req:any,res:any){const b=Buffer.alloc(9);readSync(openSync('levels.json','r'),b);res.end(b);}`);
+  await assert.rejects(()=>buildVercelGame(root,{frontendOutputDirectory:'public'}),/在运行时读取文件/);
+  // (A package folder outside the shared node_modules link, so the fixture never writes into it.)
+  await mkdir(join(root,'lib/node_modules/levels-pkg'),{recursive:true});
+  await writeFile(join(root,'lib/node_modules/levels-pkg/package.json'),JSON.stringify({name:'levels-pkg',main:'index.js'}));
+  await writeFile(join(root,'lib/node_modules/levels-pkg/index.js'),`const fs=require('fs'),path=require('path');module.exports=()=>fs.readFileSync(path.join(__dirname,'data.json'),'utf8');`);
+  await writeFile(join(root,'api/nested/ping.ts'),`import levels from '../../lib/node_modules/levels-pkg/index.js';export default function(_req:any,res:any){res.end(levels());}`);
+  await assert.rejects(()=>buildVercelGame(root,{frontendOutputDirectory:'public'}),/在运行时读取文件/);
+  // Importing the data bundles it, so the same function builds.
+  await writeFile(join(root,'api/nested/ping.ts'),`import levels from '../../levels.json';export default function(_req:any,res:any){res.end(JSON.stringify(levels));}`);
+  assert.equal((await buildVercelGame(root,{frontendOutputDirectory:'public'})).ready,true);
+});
