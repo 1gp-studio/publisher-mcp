@@ -13,7 +13,7 @@
 ```toml
 [mcp_servers.onegp]
 command = "npx"
-args = ["--yes", "github:1gp-studio/publisher-mcp#v0.6.2"]
+args = ["--yes", "github:1gp-studio/publisher-mcp#v0.7.0"]
 startup_timeout_sec = 60
 tool_timeout_sec = 600
 ```
@@ -27,7 +27,7 @@ tool_timeout_sec = 600
 在终端运行（`--scope project` 会写入当前游戏目录的 `.mcp.json`，只对这个项目生效；去掉则只对你本人生效）：
 
 ```sh
-claude mcp add onegp --scope project -- npx --yes github:1gp-studio/publisher-mcp#v0.6.2
+claude mcp add onegp --scope project -- npx --yes github:1gp-studio/publisher-mcp#v0.7.0
 ```
 
 或直接在游戏目录创建 `.mcp.json`：
@@ -35,7 +35,7 @@ claude mcp add onegp --scope project -- npx --yes github:1gp-studio/publisher-mc
 ```json
 {
   "mcpServers": {
-    "onegp": { "command": "npx", "args": ["--yes", "github:1gp-studio/publisher-mcp#v0.6.2"] }
+    "onegp": { "command": "npx", "args": ["--yes", "github:1gp-studio/publisher-mcp#v0.7.0"] }
   }
 }
 ```
@@ -167,6 +167,10 @@ Godot 也使用同一个 `gameSlug` 参数，不需要 `output_directory`。平�
 | publish_game(project_directory, title?, description?, deployment_target?, vercel_output_directory?, output_directory?, build_script?, gameSlug?) | 检测后发布；可指定原游戏标识，在转移所有权或移动文件夹后继续更新同一游戏 |
 | publish_link(url, project_directory?, title?, description?) | 把已部署的可玩 HTTPS 网址发布为 1GP 游戏页，不构建；同一网址再次提交会更新同一作品 |
 | get_publish_status(build_id) | 查询当前账号自己的构建和试玩网址 |
+| check_game_languages(project_directory) | 只读检查游戏有没有做多语言（语言文件、`?lang=`、浏览器语言、1GP SDK），返回检测到的语言、下一步和接入约定 |
+| upload_game_text(project_directory, gameSlug, original?, translations?) | 上传游戏自己的原始语言文件和你的 AI 翻好的各语言文件（`{"键名": "文字"}`），平台在 `/i18n/<游戏>/<语言>.json` 提供给玩家 |
+| get_game_text_status(gameSlug) | 每种语言：已翻译、缺哪些键、哪些键的原文改过要重翻 |
+| set_game_details(gameSlug, titles?, languages?) | 设置各语言游戏名（作者自己的，平台不覆盖）；没用平台语言文件、自带多语言的游戏也可告知支持哪些语言 |
 
 需要指定静态输出时返回 `OUTPUT_REQUIRED`，需要完整服务端产物时返回 `VERCEL_OUTPUT_REQUIRED`。错误包含 `LOCAL_BUILD_FAILED`、`UNSUPPORTED_BUILD`、`POTENTIAL_SECRET`、`AUTH_REQUIRED`，`publish_link` 另有 `INVALID_URL`、`TITLE_REQUIRED`；连不上平台时为 `NETWORK_ERROR`。遇到网络不确定的发布结果不要自动重复提交，可到网站「我的发布」查看。
 
@@ -177,6 +181,17 @@ Godot 也使用同一个 `gameSlug` 参数，不需要 `output_directory`。平�
 平台目前限制全站同时 2 个构建、每个账号最多 50 个作品，不设每日次数限制。账号邮箱验证由 Supabase 负责；平台管理员必须配置生产邮件服务，才能支持组织外用户收取登录邮件。1GP 托管团队的 Vercel 套餐及运行限制仍适用；不占用用户个人 Vercel 账号。GitHub 来源继续遵守仓库授权与构建限制。
 
 开发时可使用 `ONEGP_PLATFORM_URL` 指向另一 HTTPS 平台，或本机 HTTP localhost/127.0.0.1；凭证按平台分别保存。测试运行 `npm test`，包括真实 MCP stdio 客户端集成测试。
+
+## v0.7.0：游戏内文字多语言
+
+让游戏里的文字跟着玩家在 1GP 网站选的语言走：
+
+1. 发布前 `check_game_languages`。已有多语言：确认打开时先读 `?lang=`；还没有：先问用户要不要做成多语言，同意才改。
+2. 按约定改造（提示词 `make_game_multilingual`）：玩家看到的文字换成键名，写一份原始语言 JSON，接入 SDK 的 `AIMadeGames.i18n`，中日韩俄准备字体，按钮给长文字留余量。
+3. 用你自己的 AI 把原始语言文件翻成其余 9 种语言（zh、zh-Hant、en、es、pt-BR、ja、ko、de、fr、ru），键名一致、占位符原样保留。
+4. 发布后 `upload_game_text` 上传原始语言文件和全部翻译，`get_game_text_status` 核对，`set_game_details` 设置各语言游戏名（先给用户看）。
+
+作者在 1GP 开发者中心手改过的条目不会被上传覆盖；原文改了，旧翻译会标成需要重翻，只重翻改过的条目。平台开通翻译时，缺的条目也会由平台补上。
 
 ## v0.6.2
 
@@ -260,5 +275,6 @@ MCP 自动移除自己创建的临时镜像标签，保留私有临时目录中�
 - `publish_local_artifacts`：固定本地 API 上传；已有产物先验证复用，没有则补齐构建，不要求网页手动上传。
 - `prepare_github_publish`：传入 `repo`，可选 `kind`、`ref`、`check_result`，根据检查结果准备指定仓库。保持 GitHub 渠道，不静默改为本地上传或 Docker；完成后回原表单重新检查。
 - `prepare_docker_publish`：固定 1GP 团队运营的 Docker/EC2，检查权限和运行限制，通过现有镜像上传及发布工具完成。
+- `make_game_multilingual`：把游戏里的文字做成多语言（键名 + 原始语言文件 + SDK），用你自己的 AI 翻好全部语言后上传。
 
 所有新增托管使用 1GP 的 Vercel/AWS 资源，不要求发布者的云账号或密钥。现成链接保持原站托管。手动选择渠道后，不兼容时解释原因并建议切换，不能自行更换。只做必要部署适配，不擅自重写玩法、协议或存储；部署 ready 不代表多人玩法已验证。
