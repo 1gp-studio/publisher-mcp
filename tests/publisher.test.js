@@ -168,8 +168,8 @@ test('actual MCP stdio transport exposes the tools and rejects unsupported proje
   const client=new Client({name:'1gp-integration-test',version:'1.0.0'});
   const transport=new StdioClientTransport({command:process.execPath,args:[resolve('src/server.js')],stderr:'pipe'});
   await client.connect(transport);t.after(()=>client.close());
-  assert.deepEqual((await client.listTools()).tools.map(t=>t.name).sort(),['build_docker_image','build_vercel_game','check_game_languages','connect_platform','get_docker_upload_status','get_game_text_status','get_publish_status','inspect_game','prepare_release','publish_docker_game','publish_game','publish_link','set_game_details','upload_docker_image','upload_game_text']);
-  assert.deepEqual((await client.listPrompts()).prompts.map(p=>p.name).sort(), ['choose_publish_path','make_game_multilingual','prepare_docker_publish','prepare_github_publish','publish_local_artifacts']);
+  assert.deepEqual((await client.listTools()).tools.map(t=>t.name).sort(),['build_docker_image','build_vercel_game','check_game_languages','connect_platform','get_docker_upload_status','get_game_text_status','get_publish_status','inspect_game','prepare_release','publish_docker_game','publish_game','publish_link','set_game_details','update_github_game','upload_docker_image','upload_game_text']);
+  assert.deepEqual((await client.listPrompts()).prompts.map(p=>p.name).sort(), ['choose_publish_path','make_game_multilingual','prepare_docker_publish','prepare_github_publish','publish_local_artifacts','update_game']);
   const githubPrompt = await client.getPrompt({name:'prepare_github_publish',arguments:{repo:'https://github.com/org/game',kind:'tag',ref:'v2.0',check_result:'缺少 package-lock.json'}});
   const promptText = githubPrompt.messages[0].content.text;
   assert.match(promptText,/v2.0/); assert.match(promptText,/缺少 package-lock.json/); assert.match(promptText,/保持此渠道/);

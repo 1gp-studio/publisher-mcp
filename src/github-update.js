@@ -1,0 +1,60 @@
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { realpath } from 'node:fs/promises';
+import { isAbsolute, resolve } from 'node:path';
+const exec = promisify(execFile);
+
+// How each publishing channel is updated (prepare_release returns this as channel/nextSteps).
+export function updateRoute(context) {
+  switch (context?.source) {
+    case 'github': return { channel: 'github', nextSteps: [
+      `这个游戏从 GitHub 仓库 ${context.repo ?? ''} 发布：保持 GitHub 渠道，不要改成本地上传。`,
+      '把改动提交并推送到这个仓库的发布分支（未推送时先告诉用户要推送哪些提交，用户确认后再推送；不要强推或改写历史）。',
+      '然后调用 update_github_game（附上 release 版本说明），平台从最新提交重新构建；用 get_publish_status 等到 ready 或 failed。',
+    ] };
+    case 'external': return { channel: 'external', nextSteps: [
+      `这个游戏是外部链接（${context.playUrl ?? '作者自己的托管'}）：平台不托管它的文件。请作者先在自己的托管处更新游戏。`,
+      '然后用 publish_link（同一网址）附上 release 版本说明，更新游戏页信息；语言文件照样可以用 upload_game_text 上传。',
+    ] };
+    case 'docker': return { channel: 'docker', nextSteps: [
+      `这个游戏用 1GP Docker 发布（project: ${context.dockerProject ?? ''}）：沿用 build_docker_image → upload_docker_image → get_docker_upload_status → publish_docker_game，project 保持不变。`,
+    ] };
+    case 'local': return { channel: 'local', nextSteps: ['这个游戏从本地上传：inspect_game →（需要时 build_vercel_game）→ publish_game，带上 gameSlug 和 release。'] };
+    default: return { channel: 'new', nextSteps: ['还没有发布过：调用 inspect_game 选择合适的发布方式。'] };
+  }
+}
+
+const git = async (directory, args) => (await exec('git', ['-C', directory, ...args], { timeout: 20000, maxBuffer: 1024 * 1024 })).stdout.trim();
+const repoOf = url => url.match(/github\.com[:/]([^/\s]+\/[^/\s]+?)(?:\.git)?\/?$/i)?.[1]?.toLowerCase();
+
+// A GitHub game: check that this folder is that repository and the work is on GitHub, then ask the
+// platform to rebuild from the branch it publishes. Never pushes; says what to push instead.
+export async function updateGithubGame(platform, projectDirectory, gameSlug, release) {
+  if (!isAbsolute(projectDirectory)) return { error: '请提供当前游戏项目的绝对路径。' };
+  let directory;
+  try { directory = await realpath(resolve(projectDirectory)); } catch { return { error: '无法读取项目目录。' }; }
+  const context = await platform.request(`/api/publish/releases/context?${new URLSearchParams({ slug: gameSlug })}`);
+  if (context.error) return context;
+  if (context.source !== 'github') return { error: '这个游戏不是从 GitHub 发布的。', code: 'NOT_GITHUB', ...updateRoute(context) };
+  const expected = String(context.repo ?? '').toLowerCase();
+  let remotes;
+  try { remotes = (await git(directory, ['remote', '-v'])).split('\n'); } catch { return { error: '这个文件夹不是 git 仓库，无法确认它就是游戏的 GitHub 仓库。', code: 'NOT_A_REPOSITORY' }; }
+  const remote = remotes.map(line => line.split(/\s+/)).find(([, url]) => repoOf(url ?? '') === expected)?.[0];
+  if (!remote) return { error: `这个文件夹的远程仓库不是 ${expected}。请在游戏的仓库里操作。`, code: 'OTHER_REPOSITORY' };
+  const branchInfo = await platform.request(`/api/games/${encodeURIComponent(gameSlug)}/build`);
+  const branch = typeof branchInfo.branch === 'string' && branchInfo.branch ? branchInfo.branch : null;
+  if (!branch) return { error: branchInfo.error ?? '读不到这个游戏发布用的分支。', code: 'BRANCH_UNKNOWN' };
+  const dirty = await git(directory, ['status', '--porcelain', '--untracked-files=no']).catch(() => '');
+  if (dirty) return { error: '有还没提交的改动。先和用户确认、提交，再推送到 GitHub。', code: 'UNCOMMITTED_CHANGES', branch, files: dirty.split('\n').slice(0, 20) };
+  try { await git(directory, ['fetch', '--quiet', remote, branch]); } catch { return { error: `无法从 ${remote} 读取分支 ${branch}（网络或权限问题）。`, code: 'FETCH_FAILED', branch }; }
+  const head = await git(directory, ['rev-parse', 'HEAD']);
+  const remoteHead = await git(directory, ['rev-parse', `${remote}/${branch}`]).catch(() => '');
+  const onRemote = remoteHead && await git(directory, ['merge-base', '--is-ancestor', head, `${remote}/${branch}`]).then(() => true, () => false);
+  if (!onRemote) {
+    const ahead = await git(directory, ['log', '--oneline', `${remote}/${branch}..HEAD`]).catch(() => '');
+    return { error: `本地的提交还没在 GitHub 的 ${branch} 分支上。告诉用户要推送这些提交，用户确认后推送到 ${remote} ${branch}（不要强推），再调用 update_github_game。`, code: 'NOT_PUSHED', branch, commits: ahead.split('\n').filter(Boolean).slice(0, 20) };
+  }
+  const result = await platform.request(`/api/games/${encodeURIComponent(gameSlug)}/build`, { body: { kind: 'branch', value: branch, ...(release ? { release } : {}) } });
+  if (result.error) return result;
+  return { ...result, branch, commit: remoteHead, message: '已从 GitHub 最新提交开始构建。用 get_publish_status 等到 ready 或 failed，不要重复提交。' };
+}

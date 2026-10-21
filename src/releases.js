@@ -4,6 +4,7 @@ import { join, isAbsolute } from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 const exec = promisify(execFile);
+import { updateRoute } from './github-update.js';
 const excluded = /^(?:\..*|node_modules|dist|build|out|vendor|coverage|target)$/i;
 const secret = /^(?:credentials.*|secrets.*|.*\.(?:pem|key))$/i;
 export async function sourceSnapshot(directory) {
@@ -36,8 +37,9 @@ export async function prepareRelease(platform, directory, gameSlug, dockerProjec
   const params = new URLSearchParams(gameSlug ? {slug:gameSlug} : dockerProject ? {dockerProject} : {projectId:snapshot.projectId});
   const context = await platform.request('/api/publish/releases/context?'+params);
   if(context.error)return context;
-  return { ...context, previous: context.previous ? {...context.previous,source_manifest:undefined}:null,
+  // How this game is published decides the update route (GitHub rebuild, local upload, link, Docker).
+  return { ...context, ...updateRoute(context), previous: context.previous ? {...context.previous,source_manifest:undefined}:null,
     comparison:compareSources(context.previous?.source_manifest,snapshot.sourceFiles),
     sourceCommit:snapshot.sourceCommit,
-    instructions:'Read the changed local files to understand gameplay, levels, balance, fixes, UX and assets. File names alone do not establish major/minor changes. Use major for substantial redesign/save incompatibility, minor for new gameplay or levels, patch for fixes/balance, assets for resource-only changes (patch increment). Start at 1.0.0. Choose the corresponding suggested version and write concise player-facing notes by relevant area. If no baseline exists, inspect actual code and describe only verified changes; never invent a comparison. Supply release {version,title,notes,changeType} to publish_game or publish_docker_game; the platform attaches notes to the build and exposes them only after success.' };
+    instructions:'Read the changed local files to understand gameplay, levels, balance, fixes, UX and assets. File names alone do not establish major/minor changes. Use major for substantial redesign/save incompatibility, minor for new gameplay or levels, patch for fixes/balance, assets for resource-only changes (patch increment). Start at 1.0.0. Choose the corresponding suggested version and write concise player-facing notes by relevant area. If no baseline exists, inspect actual code and describe only verified changes; never invent a comparison. Then follow channel/nextSteps: supply release {version,title,notes,changeType} to the matching tool (update_github_game, publish_game, publish_link or publish_docker_game); the platform attaches notes to the build and exposes them only after success.' };
 }

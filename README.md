@@ -17,7 +17,7 @@
 ```toml
 [mcp_servers.onegp]
 command = "npx"
-args = ["--yes", "github:1gp-studio/publisher-mcp#v0.7.1"]
+args = ["--yes", "github:1gp-studio/publisher-mcp#v0.7.2"]
 startup_timeout_sec = 60
 tool_timeout_sec = 600
 ```
@@ -31,7 +31,7 @@ tool_timeout_sec = 600
 在终端运行一次（`--scope user` 对你本人的所有项目生效）：
 
 ```sh
-claude mcp add onegp --scope user -- npx --yes github:1gp-studio/publisher-mcp#v0.7.1
+claude mcp add onegp --scope user -- npx --yes github:1gp-studio/publisher-mcp#v0.7.2
 ```
 
 已经装过要升级时，先 `claude mcp remove onegp --scope user`，再运行上面这行。用 `claude mcp list` 可以看到当前装的是哪一份。
@@ -163,6 +163,7 @@ Godot 也使用同一个 `gameSlug` 参数，不需要 `output_directory`。平�
 | publish_game(project_directory, title?, description?, deployment_target?, vercel_output_directory?, output_directory?, build_script?, gameSlug?) | 检测后发布；可指定原游戏标识，在转移所有权或移动文件夹后继续更新同一游戏 |
 | publish_link(url, project_directory?, title?, description?) | 把已部署的可玩 HTTPS 网址发布为 1GP 游戏页，不构建；同一网址再次提交会更新同一作品 |
 | get_publish_status(build_id) | 查询当前账号自己的构建和试玩网址 |
+| update_github_game(project_directory, gameSlug, release?) | 更新从 GitHub 发布的游戏：确认这是游戏的仓库、改动已提交并推送到发布分支，再让平台从最新提交重新构建；不会替你推送 |
 | check_game_languages(project_directory) | 只读检查游戏有没有做多语言（语言文件、`?lang=`、浏览器语言、1GP SDK），返回检测到的语言、下一步和接入约定 |
 | upload_game_text(project_directory, gameSlug, original?, translations?) | 上传游戏自己的原始语言文件和你的 AI 翻好的各语言文件（`{"键名": "文字"}`），平台在 `/i18n/<游戏>/<语言>.json` 提供给玩家 |
 | get_game_text_status(gameSlug) | 每种语言：已翻译、缺哪些键、哪些键的原文改过要重翻 |
@@ -177,6 +178,17 @@ Godot 也使用同一个 `gameSlug` 参数，不需要 `output_directory`。平�
 平台目前限制全站同时 2 个构建、每个账号最多 50 个作品，不设每日次数限制。账号邮箱验证由 Supabase 负责；平台管理员必须配置生产邮件服务，才能支持组织外用户收取登录邮件。1GP 托管团队的 Vercel 套餐及运行限制仍适用；不占用用户个人 Vercel 账号。GitHub 来源继续遵守仓库授权与构建限制。
 
 开发时可使用 `ONEGP_PLATFORM_URL` 指向另一 HTTPS 平台，或本机 HTTP localhost/127.0.0.1；凭证按平台分别保存。测试运行 `npm test`，包括真实 MCP stdio 客户端集成测试。
+
+## v0.7.2：更新游戏时自动走对的路
+
+`prepare_release` 先说明这个游戏是怎么发布的（`channel`：github / local / external / docker / new）和下一步（`nextSteps`），更新时不用再按渠道选提示词：
+
+- GitHub：不改成本地上传；确认改动已提交、推送（推送前先问用户），再用新工具 `update_github_game` 让平台从最新提交重新构建，不用回开发者中心点「发新版本」。
+- 本地上传：`inspect_game` →（需要时 `build_vercel_game`）→ `publish_game`。
+- 外部链接：先在自己的托管处更新，再用 `publish_link` 更新游戏信息；语言文件照样能上传。
+- Docker：沿用原来的 Docker 流程。
+
+提示词 `update_game` 是这套通用的更新流程。安装方式不变，把版本号改成 `v0.7.2` 后重启 MCP 客户端。
 
 ## v0.7.1
 
@@ -275,6 +287,7 @@ MCP 自动移除自己创建的临时镜像标签，保留私有临时目录中�
 - `publish_local_artifacts`：固定本地 API 上传；已有产物先验证复用，没有则补齐构建，不要求网页手动上传。
 - `prepare_github_publish`：传入 `repo`，可选 `kind`、`ref`、`check_result`，根据检查结果准备指定仓库。保持 GitHub 渠道，不静默改为本地上传或 Docker；完成后回原表单重新检查。
 - `prepare_docker_publish`：固定 1GP 团队运营的 Docker/EC2，检查权限和运行限制，通过现有镜像上传及发布工具完成。
+- `update_game`：更新已发布的游戏（传入 `gameSlug`），按 `prepare_release` 返回的发布方式走，不用按渠道选提示词。
 - `make_game_multilingual`：把游戏里的文字做成多语言（键名 + 原始语言文件 + SDK），用你自己的 AI 翻好全部语言后上传。
 
 所有新增托管使用 1GP 的 Vercel/AWS 资源，不要求发布者的云账号或密钥。现成链接保持原站托管。手动选择渠道后，不兼容时解释原因并建议切换，不能自行更换。只做必要部署适配，不擅自重写玩法、协议或存储；部署 ready 不代表多人玩法已验证。

@@ -1,6 +1,6 @@
 
 // The MCP is installed once per user, never per game project (no .mcp.json in the game).
-const setup = '1GP MCP 只装一次，装在用户级，不要在游戏项目里新建 .mcp.json：Claude Code 运行 `claude mcp add onegp --scope user -- npx --yes github:1gp-studio/publisher-mcp#v0.7.1`，Codex 写进 ~/.codex/config.toml 的 [mcp_servers.onegp]（说明见 https://github.com/1gp-studio/publisher-mcp）；已经装过就只把版本号改成 v0.7.1。当前项目的 .mcp.json 里如果还有旧的 onegp，提醒我删掉，以免版本打架。然后连接我的 1GP 账号，在当前本地游戏项目中操作。';
+const setup = '1GP MCP 只装一次，装在用户级，不要在游戏项目里新建 .mcp.json：Claude Code 运行 `claude mcp add onegp --scope user -- npx --yes github:1gp-studio/publisher-mcp#v0.7.2`，Codex 写进 ~/.codex/config.toml 的 [mcp_servers.onegp]（说明见 https://github.com/1gp-studio/publisher-mcp）；已经装过就只把版本号改成 v0.7.2。当前项目的 .mcp.json 里如果还有旧的 onegp，提醒我删掉，以免版本打架。然后连接我的 1GP 账号，在当前本地游戏项目中操作。';
 const hosting = '所有新增托管都使用 1GP 的资源；不要要求我登录 Vercel、AWS 或 ECR，不要创建个人云项目或索取云密钥。不要上传凭证、无关源码或 source map。';
 const languages = '发布前调用 check_game_languages：游戏已经有多语言就确认它先读 ?lang=；还没有就问我要不要做成多语言（make_game_multilingual 的做法），我同意才改。发布后用 set_game_details 给出各语言游戏名和简介（先给我看）。';
 const verify = '发布前调用 prepare_release，依据实际修改准备版本说明；发布后等待任务 ready 或 failed，检查网页和必要接口，给出链接及未验证项。部署成功不代表多人玩法已验证，不要求多人端到端测试作为发布门槛。';
@@ -15,4 +15,7 @@ export function githubPreparationPrompt(repo, target, reason) {
 
 export const dockerPublishPrompt = `${setup}我已选择 1GP 团队运营的 Docker + AWS EC2 托管。检查实际运行需求和账号权限；准备 Dockerfile、.dockerignore，保留 HTTP/WebSocket 和游戏状态逻辑。目标 linux/amd64，非 root 用户，监听 0.0.0.0:3000，GET / 返回 2xx，不声明 VOLUME；运行限 512 MiB 内存、1 CPU、只读文件系统、仅 /tmp 可写，不能依赖本地持久化。检查缺失外部服务；限制不满足时说明阻碍，不自动切换渠道。调用 build_docker_image 或复用有效 docker save archive，调用 upload_docker_image，等待 get_docker_upload_status 为 ready，再调用 publish_docker_game；沿用同一 project 和 upload_id，结果不明时先查询，不盲目重复发布。目前仅供团队管理员，一台主机只运行一个游戏；更新会中断连接并清空内存状态。${hosting}${languages}${verify}`;
 
-export const multilingualPrompt = `${setup}请把当前游戏做成多语言，让游戏里的文字跟着玩家在 1GP 网站选的语言走。先调用 check_game_languages 看现状和约定（convention）。按约定改造：玩家看到的文字换成键名，写一份原始语言 JSON，接入 1GP SDK 的 AIMadeGames.i18n（先读 ?lang=），给中日韩俄准备能显示的字体，按钮给长文字留余量；不要改玩法。然后用你自己的能力把原始语言文件翻成其余 9 种语言（zh、zh-Hant、en、es、pt-BR、ja、ko、de、fr、ru 里除原始语言外的），每种一个 JSON，键名完全一致，占位符原样保留。本地试玩至少两种语言，确认文字显示正常、不溢出。发布或更新游戏后，用 upload_game_text 上传原始语言文件和全部翻译，用 get_game_text_status 核对；再用 set_game_details 设置各语言游戏名和简介（先给我看）。${hosting}`;
+export const multilingualPrompt = `${setup}请把当前游戏做成多语言，让游戏里的文字跟着玩家在 1GP 网站选的语言走。先调用 check_game_languages 看现状和约定（convention）。按约定改造：玩家看到的文字换成键名，写一份原始语言 JSON，接入 1GP SDK 的 AIMadeGames.i18n（先读 ?lang=），给中日韩俄准备能显示的字体，按钮给长文字留余量；不要改玩法。然后用你自己的能力把原始语言文件翻成其余 9 种语言（zh、zh-Hant、en、es、pt-BR、ja、ko、de、fr、ru 里除原始语言外的），每种一个 JSON，键名完全一致，占位符原样保留。本地试玩至少两种语言，确认文字显示正常、不溢出。发布或更新游戏后（更新时先调用 prepare_release，按它返回的发布方式和下一步走，不要换渠道），用 upload_game_text 上传原始语言文件和全部翻译，用 get_game_text_status 核对；再用 set_game_details 设置各语言游戏名和简介（先给我看）。${hosting}`;
+
+// Updating an existing game, whatever its channel: prepare_release says how it is published and what to do.
+export const updateGamePrompt = (slug) => `${setup}请更新我已发布的游戏 ${slug}。先调用 prepare_release（gameSlug=${slug}），看它返回的发布方式（channel）和下一步（nextSteps），按那条路走，不要换渠道：GitHub 发布的先确认改动已提交，推送前先问我，再用 update_github_game 让平台重新构建；本地上传的用 inspect_game →（需要时 build_vercel_game）→ publish_game；外部链接的提醒我先在自己的托管处更新，再用 publish_link 更新游戏信息；Docker 的沿用原来的 Docker 流程。版本说明按 prepare_release 的对比来写。${languages}${hosting}${verify}`;
