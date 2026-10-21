@@ -17,7 +17,7 @@
 ```toml
 [mcp_servers.onegp]
 command = "npx"
-args = ["--yes", "github:1gp-studio/publisher-mcp#v0.7.3"]
+args = ["--yes", "github:1gp-studio/publisher-mcp#v0.7.4"]
 startup_timeout_sec = 60
 tool_timeout_sec = 600
 ```
@@ -31,7 +31,7 @@ tool_timeout_sec = 600
 在终端运行一次（`--scope user` 对你本人的所有项目生效）：
 
 ```sh
-claude mcp add onegp --scope user -- npx --yes github:1gp-studio/publisher-mcp#v0.7.3
+claude mcp add onegp --scope user -- npx --yes github:1gp-studio/publisher-mcp#v0.7.4
 ```
 
 已经装过要升级时，先 `claude mcp remove onegp --scope user`，再运行上面这行。用 `claude mcp list` 可以看到当前装的是哪一份。
@@ -163,6 +163,9 @@ Godot 也使用同一个 `gameSlug` 参数，不需要 `output_directory`。平�
 | publish_game(project_directory, title?, description?, deployment_target?, vercel_output_directory?, output_directory?, build_script?, gameSlug?) | 检测后发布；可指定原游戏标识，在转移所有权或移动文件夹后继续更新同一游戏 |
 | publish_link(url, project_directory?, title?, description?) | 把已部署的可玩 HTTPS 网址发布为 1GP 游戏页，不构建；同一网址再次提交会更新同一作品 |
 | get_publish_status(build_id) | 查询当前账号自己的构建和试玩网址 |
+| find_my_game(project_directory, gameSlug?) | 按当前项目找到你自己的游戏；给了编号就核对它是不是这个项目的 |
+| validate_game_text(project_directory, original, translations, separators?) | 上传前检查译文：键名、占位符、换行、分隔符、长度和字体 |
+| set_game_covers(project_directory, gameSlug, base?, special?, modes?, position?) | 各语言封面：底图、专用封面、每种语言的选择和游戏名位置 |
 | update_github_game(project_directory, gameSlug, release?) | 更新从 GitHub 发布的游戏：确认这是游戏的仓库、改动已提交并推送到发布分支，再让平台从最新提交重新构建；不会替你推送 |
 | check_game_languages(project_directory) | 只读检查游戏有没有做多语言（语言文件、`?lang=`、浏览器语言、1GP SDK），返回检测到的语言、下一步和接入约定 |
 | upload_game_text(project_directory, gameSlug, original?, translations?) | 上传游戏自己的原始语言文件和你的 AI 翻好的各语言文件（`{"键名": "文字"}`），平台在 `/i18n/<游戏>/<语言>.json` 提供给玩家 |
@@ -179,13 +182,24 @@ Godot 也使用同一个 `gameSlug` 参数，不需要 `output_directory`。平�
 
 开发时可使用 `ONEGP_PLATFORM_URL` 指向另一 HTTPS 平台，或本机 HTTP localhost/127.0.0.1；凭证按平台分别保存。测试运行 `npm test`，包括真实 MCP stdio 客户端集成测试。
 
-## v0.7.3：默认跟随网站的五种语言
+## v0.7.4：自己找游戏、译文检查、各语言封面
+
+- `find_my_game`：按当前项目的 GitHub 仓库、试玩网址（GitHub Pages、homepage、CNAME）或本地上传，找到你自己的游戏，不用填编号；多个就列出来选，给的编号和项目对不上会拒绝。`prepare_release` 也先做这一步。
+- 外部链接的游戏：只上传语言文件、游戏名、简介时上传完就生效，不用发新版本；改了游戏代码才需要更新自己的托管。
+- `validate_game_text`：检查键名、占位符、换行、分隔符、长度（`<原始语言文件>.limits.json`，中日韩字算 2）和字体能不能显示各语言的字；`upload_game_text` 上传前自动检查，有错误先列出来。
+- 语言文件里的 `meta.title` 会补上平台还没有的各语言游戏名；和已有的不一样时只提醒。
+- `set_game_covers`：上传底图和各语言专用封面，设置每种语言用主封面 / 生成 / 专用封面和游戏名位置，和编辑页同一套。
+- 通用提示词只写通用步骤，项目结构以检查结果和项目自己的说明为准。
+
+安装方式不变，把版本号改成 `v0.7.4` 后重启 MCP 客户端。
+
+## v0.7.4：默认跟随网站的五种语言
 
 默认推荐目标依次为简体中文、英文、日文、韩文、西班牙文（`zh`、`en`、`ja`、`ko`、`es`）。游戏内文字、游戏名和简介都按这五种目标按需补齐，只翻缺失或过期的内容，跳过原始语言。原始语言不在这五种中时保留原文，并补齐五种目标，不固定要求“另外四种”。
 
 已有繁体中文、巴西葡语、德语、法语和俄语仍可检测、上传、读取状态和更新资料，不会删除或要求重新翻译。`check_game_languages` 的 `siteLanguages` 返回五个默认目标，`supportedGameLanguages` 返回兼容的十种游戏语言；上传工具和 `set_game_details` 接受全部十种语言，名称及简介可只提交需要更新的语言。
 
-更新安装配置到 `v0.7.3` 后重启 MCP 客户端。游戏已经有的多语言实现和用户的原始语言保持不变。
+更新安装配置到 `v0.7.4` 后重启 MCP 客户端。游戏已经有的多语言实现和用户的原始语言保持不变。
 
 ## v0.7.2：更新游戏时自动走对的路
 

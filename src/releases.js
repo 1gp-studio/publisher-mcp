@@ -5,6 +5,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 const exec = promisify(execFile);
 import { updateRoute } from './github-update.js';
+import { findMyGame } from './game-match.js';
 const excluded = /^(?:\..*|node_modules|dist|build|out|vendor|coverage|target)$/i;
 const secret = /^(?:credentials.*|secrets.*|.*\.(?:pem|key))$/i;
 export async function sourceSnapshot(directory) {
@@ -34,6 +35,14 @@ export function compareSources(previous, current) {
 }
 export async function prepareRelease(platform, directory, gameSlug, dockerProject) {
   const snapshot = await sourceSnapshot(directory);
+  // The game for this project: the named one only when it belongs to this project; otherwise the one
+  // the project matches (GitHub repository, play address, local upload). Several: the creator picks.
+  if (!dockerProject) {
+    const found = await findMyGame(platform, directory, gameSlug);
+    if (found.error) return found;
+    if (!gameSlug && found.matches?.length > 1) return { ...found, code: 'CHOOSE_GAME' };
+    gameSlug = gameSlug ?? found.gameSlug;
+  }
   const params = new URLSearchParams(gameSlug ? {slug:gameSlug} : dockerProject ? {dockerProject} : {projectId:snapshot.projectId});
   const context = await platform.request('/api/publish/releases/context?'+params);
   if(context.error)return context;

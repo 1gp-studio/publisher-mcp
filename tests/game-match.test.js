@@ -1,0 +1,22 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { projectSignals, findMyGame } from '../src/game-match.js';
+test('the project is matched by its GitHub repository, Pages address and CNAME, without a game id',async t=>{
+ const dir=await mkdtemp(join(tmpdir(),'match-'));t.after(()=>rm(dir,{recursive:true,force:true}));
+ execFileSync('git',['init','-q',dir]);execFileSync('git',['-C',dir,'remote','add','origin','https://github.com/Owner/OvertimeGame.git']);
+ await writeFile(join(dir,'CNAME'),'game.example.com\n');
+ const signals=await projectSignals(dir);
+ assert.deepEqual(signals.repos,['owner/overtimegame']);
+ assert.ok(signals.urls.includes('https://owner.github.io/overtimegame/'));
+ assert.ok(signals.urls.includes('https://game.example.com/'));
+ const one={request:async(path,{body})=>(assert.equal(path,'/api/developer/games/match'),assert.deepEqual(body.repos,['owner/overtimegame']),{matches:[{slug:'game-1',title:'加班'}]})};
+ assert.equal((await findMyGame(one,dir)).gameSlug,'game-1');
+ const two={request:async()=>({matches:[{slug:'a',title:'A'},{slug:'b',title:'B'}]})};
+ const several=await findMyGame(two,dir);assert.equal(several.gameSlug,undefined);assert.equal(several.matches.length,2);
+ const wrong={request:async()=>({error:'对不上',code:'GAME_MISMATCH'})};
+ assert.equal((await findMyGame(wrong,dir,'other-game')).code,'GAME_MISMATCH');
+});

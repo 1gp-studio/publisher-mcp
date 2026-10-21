@@ -20,6 +20,14 @@ export class Platform {
     try{response=await fetch(this.origin+path,{method,headers:{Authorization:`Bearer ${secret}`,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined,redirect:'error',signal:AbortSignal.timeout(175000)});}catch{return {code:'NETWORK_ERROR',error:'无法连接平台，请稍后查询状态；不要自动重复提交发布。'};}
     try{return await response.json();}catch{return {code:'PLATFORM_ERROR',error:`平台返回异常响应 (${response.status})。`};}
   }
+  // A multipart upload (a cover picture): same credential, the browser-style form as the body.
+  async upload(path,form) {
+    const secret=await this.token();
+    if(!secret)return {code:'AUTH_REQUIRED',error:'请先运行 connect_platform，并由用户在浏览器确认授权。'};
+    let response;
+    try{response=await fetch(this.origin+path,{method:'POST',headers:{Authorization:`Bearer ${secret}`},body:form,redirect:'error',signal:AbortSignal.timeout(120000)});}catch{return {code:'NETWORK_ERROR',error:'无法连接平台，请稍后重试。'};}
+    try{return await response.json();}catch{return {code:'PLATFORM_ERROR',error:`平台返回异常响应 (${response.status})。`};}
+  }
   async connect() {
     let token=await this.token();
     if(token){const state=await this.request('/api/connections',{token});if(state.connected)return {connected:true,message:'已连接，可以调用 inspect_game / publish_game。'};if(state.code&&state.code!=='AUTH_REQUIRED')return state;}

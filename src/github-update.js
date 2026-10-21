@@ -13,8 +13,9 @@ export function updateRoute(context) {
       '然后调用 update_github_game（附上 release 版本说明），平台从最新提交重新构建；用 get_publish_status 等到 ready 或 failed。',
     ] };
     case 'external': return { channel: 'external', nextSteps: [
-      `这个游戏是外部链接（${context.playUrl ?? '作者自己的托管'}）：平台不托管它的文件。请作者先在自己的托管处更新游戏。`,
-      '然后用 publish_link（同一网址）附上 release 版本说明，更新游戏页信息；语言文件照样可以用 upload_game_text 上传。',
+      `这个游戏是外部链接（${context.playUrl ?? '作者自己的托管'}）：平台不托管它的文件。`,
+      '只上传或修改语言文件（upload_game_text）、各语言游戏名和简介（set_game_details）时：译文运行时从平台读取，上传完就生效，不用发新版本，也不用去开发者中心点「发新版本」。',
+      '改了游戏代码时：请作者先在自己的托管处更新游戏，再用 publish_link（同一网址）附上 release 版本说明，更新游戏页信息。',
     ] };
     case 'docker': return { channel: 'docker', nextSteps: [
       `这个游戏用 1GP Docker 发布（project: ${context.dockerProject ?? ''}）：沿用 build_docker_image → upload_docker_image → get_docker_upload_status → publish_docker_game，project 保持不变。`,

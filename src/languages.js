@@ -1,4 +1,6 @@
 import { readFile,readdir,lstat,realpath } from 'node:fs/promises';
+import { validateGameText } from './text-check.js';
+import { fontCoverage } from './fonts.js';
 import { resolve,isAbsolute,join,relative,sep,basename } from 'node:path';
 
 // In-game text in every site language (platform docs/todo/game-translation.md, layer 1).
@@ -27,7 +29,7 @@ async function projectFile(directory,path,max=400000){
   if(!stat.isFile()||stat.isSymbolicLink()||stat.size>max)throw new Error(`无法读取 ${path}（不是普通文件或超过 ${Math.round(max/1000)} KB）`);
   return readFile(full,'utf8');
 }
-async function* walk(directory,base=directory,depth=0){
+export async function* walk(directory,base=directory,depth=0){
   if(depth>8)return;
   let entries;try{entries=await readdir(directory,{withFileTypes:true});}catch{return;}
   for(const entry of entries){
@@ -62,6 +64,13 @@ export async function checkGameLanguages(projectDirectory){
     signals.keyCalls+=(text.match(/\bt\(\s*['"][\w.:-]+['"]/g)??[]).length;
     signals.hanTextLines+=text.split('\n').filter(line=>/['"`>][^'"`<]*[一-鿿]/.test(line)).length;
   }
+  // Which writing systems the game's own fonts can draw (a missing one falls back to a system font).
+  const fonts=[];
+  for await(const path of walk(directory)){
+    if(!/\.(?:woff2?|ttf|otf)$/i.test(path)||fonts.length>=20)continue;
+    try{const stat=await lstat(join(directory,path));if(stat.size>30_000_000)continue;const coverage=fontCoverage(await readFile(join(directory,path)));
+      if(coverage)fonts.push({path,covers:Object.entries({latin:'é',han:'中',kana:'あ',hangul:'한',cyrillic:'Ж'}).filter(([,char])=>coverage.has(char.codePointAt(0))).map(([name])=>name)});}catch{}
+  }
   const languages=[...new Set(files.map(file=>file.locale))];
   const multilingual=languages.length>1||signals.usesSdkI18n||signals.i18nLibrary;
   const nextSteps=[];
@@ -80,6 +89,9 @@ export const convention=[
   `默认语言：先读 ?lang=（网站当前提供 ${siteLanguages.join('、')}），没有再看浏览器语言；SDK 的 AIMadeGames.lang() 已按这个顺序。游戏里可以有语言切换，但打开时必须听 ?lang=；已有其他语言的读取和切换保留。`,
   '字体：中日韩要有能显示这些字的字体，别只用拉丁像素字体；已有其他语言也保留所需字体。按钮和固定宽度的地方给变长的文字留余量。',
   `翻译：默认按 ${siteLanguages.join('、')} 的顺序补齐缺失或过期的目标语言条目，跳过原始语言；原始语言不在这五种中时保留原文并补齐这五种目标。保留已有其他语言，不要求新增它们。按游戏的语气翻，按钮短而清楚，占位符原样保留，专有名词不硬译。每种语言一个 JSON，键名和原始语言文件完全一致。`,
+  '游戏名：语言文件里用 meta.title 放这个语言的游戏名，上传时平台用它补上缺的各语言游戏名（和平台已有的不一样时只提醒，不覆盖）。',
+  '存档里存键名和参数（比如 {key: "found_item", params: {item: "sword"}}），不存翻译后的文字，这样玩家换语言后，进行中的事件和日志也跟着换。',
+  '长度上限：在原始语言文件旁放 <文件名>.limits.json（如 zh.limits.json：{"start": 12, "*": 40}），按显示宽度算（中日韩字算 2，其他算 1）；validate_game_text 会检查。',
 ].join('\n');
 
 async function readEntries(directory,path){
@@ -88,23 +100,34 @@ async function readEntries(directory,path){
   return data;
 }
 // Upload the game's own file, then each translation (marked as made by the creator's AI).
-export async function uploadGameText(platform,projectDirectory,gameSlug,original,translations=[]){
+export async function uploadGameText(platform,projectDirectory,gameSlug,original,translations=[],{force=false,separators=[]}={}){
   if(!isAbsolute(projectDirectory))return {error:'请提供当前游戏项目的绝对路径。'};
   let directory;try{directory=await realpath(resolve(projectDirectory));}catch{return {error:'无法读取项目目录。'};}
-  const path=`/api/developer/language-files/${encodeURIComponent(gameSlug)}`,uploaded=[];
+  // Checked first (validate_game_text): problems are listed, and nothing is uploaded until they are fixed.
+  let check=null;
+  if(original&&translations.length){
+    check=await validateGameText(directory,original,translations,{separators});
+    if(check.error)return check;
+    if(!check.ok&&!force)return {error:'译文检查没通过，先修好再上传（validate_game_text 的结果见 errors）。',code:'TEXT_CHECK_FAILED',...check};
+  }
+  const path=`/api/developer/language-files/${encodeURIComponent(gameSlug)}`,uploaded=[],titles={filled:[],conflicts:[]};
+  const note=result=>{if(result.titleSync){titles.filled.push(...(result.titleSync.filled??[]));titles.conflicts.push(...(result.titleSync.conflicts??[]));}};
   try{
     if(original){
       const result=await platform.request(path,{method:'PUT',body:{locale:original.locale,kind:'original',entries:await readEntries(directory,original.path)}});
       if(result.error)return {...result,uploaded};
-      uploaded.push(original.locale);
+      uploaded.push(original.locale);note(result);
     }
     for(const item of translations){
       const result=await platform.request(path,{method:'PUT',body:{locale:item.locale,kind:'translation',by:'ai_creator',entries:await readEntries(directory,item.path)}});
       if(result.error)return {...result,uploaded,failed:item.locale};
-      uploaded.push(item.locale);
+      uploaded.push(item.locale);note(result);
     }
   }catch(error){return {error:error.message,uploaded};}
-  return {ok:true,uploaded,...await gameTextStatus(platform,gameSlug)};
+  return {ok:true,uploaded,
+    // meta.title fills a language's game name the platform did not have; a different one is only reported.
+    ...(titles.filled.length||titles.conflicts.length?{gameNames:{...titles,next:titles.conflicts.length?'这些语言的 meta.title 和平台上的游戏名不一样，平台没有改。给用户看，确认后用 set_game_details 设置。':'meta.title 已填进这些语言的游戏名。'}}:{}),
+    ...(check?{warnings:check.warnings,fonts:check.fonts}:{}),...await gameTextStatus(platform,gameSlug)};
 }
 // Per language: up to date, missing keys, or made from an older original (only those need translating).
 export async function gameTextStatus(platform,gameSlug){
