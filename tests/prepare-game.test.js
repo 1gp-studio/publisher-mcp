@@ -58,7 +58,7 @@ test('existing capabilities are retained without asking to enable them or writin
   assert.deepEqual(result.decisions, []);
   assert.equal(result.integrations.cloudSaves.schemaVersion, 7);
   assert.deepEqual(result.integrations.leaderboards, [board]);
-  assert.ok(f.calls.filter(call => call.path.includes('game-integrations')).every(call => !call.options));
+  assert.ok(f.calls.filter(call => call.path.includes('game-integrations')).every(call => !call.options?.body && !call.options?.method));
   assert.deepEqual(await readdir(f.directory), []);
 });
 
@@ -72,7 +72,7 @@ test('explicit false is remembered as intent and never disables live capabilitie
   assert.deepEqual(next.integrations, f.state.integrations);
   assert.deepEqual(next.decisions, []);
   assert.deepEqual(JSON.parse(await readFile(await f.file(), 'utf8')), selected);
-  assert.ok(f.calls.filter(call => call.path.includes('game-integrations')).every(call => !call.options));
+  assert.ok(f.calls.filter(call => call.path.includes('game-integrations')).every(call => !call.options?.body && !call.options?.method));
 });
 
 test('saved choices are scoped to account, platform and canonical project directory', async t => {
@@ -186,6 +186,57 @@ test('preparation validates project paths and inspection does not execute build 
 
 test('missing account storage cannot erase an explicit choice or persist it unscoped', async t => {
   const f = await fixture(t); f.state.token = null;
+  const result = await prepareGame(f.platform, f.project, { features: { cloudSaves: false } });
+  assert.equal(result.features.cloudSaves, false); assert.ok(result.preferenceWarning);
+  assert.deepEqual(await readdir(f.directory), []);
+});
+
+test('an account switch during remote preparation pins reads and never stores A choices for B', async t => {
+  for (const switchAt of ['match', 'context', 'game-integrations']) await t.test(switchAt, async t => {
+    const f = await fixture(t), tokenA = f.state.token, tokenB = 'b'.repeat(64);
+    const fileA = await f.file();
+    f.state.token = tokenB;
+    const fileB = await f.file();
+    await writeFile(fileB, '{"cloudSaves":false}');
+    f.state.token = tokenA;
+    const request = f.platform.request;
+    f.platform.request = async (path, options) => {
+      assert.equal(options?.token, tokenA, 'Every remote read must use the starting account');
+      const result = await request(path, options);
+      if (path.includes(switchAt)) f.state.token = tokenB;
+      return result;
+    };
+    const result = await prepareGame(f.platform, f.project, { features: { cloudSaves: true } });
+    assert.equal(result.code, 'ACCOUNT_CHANGED');
+    assert.deepEqual(Object.keys(result).sort(), ['code', 'error']);
+    assert.equal(await readFile(fileB, 'utf8'), '{"cloudSaves":false}');
+    await assert.rejects(readFile(fileA), { code: 'ENOENT' });
+    assert.ok(f.calls.length >= 2);
+    assert.ok(f.calls.every(call => call.options.token === tokenA));
+  });
+});
+
+test('a switch during local persistence still writes only the starting account and rejects the result', async t => {
+  const f = await fixture(t), tokenA = f.state.token, fileA = await f.file();
+  f.state.token = 'b'.repeat(64); const fileB = await f.file(); f.state.token = tokenA;
+  let checks = 0;
+  f.platform.token = async () => {
+    // Start, after release, before preferences, then the final check after local persistence.
+    if (++checks === 4) f.state.token = 'b'.repeat(64);
+    return f.state.token;
+  };
+  const result = await prepareGame(f.platform, f.project, { features: { cloudSaves: true } });
+  assert.equal(result.code, 'ACCOUNT_CHANGED');
+  assert.deepEqual(JSON.parse(await readFile(fileA, 'utf8')), { cloudSaves: true });
+  await assert.rejects(readFile(fileB), { code: 'ENOENT' });
+  assert.ok(f.calls.every(call => call.options.token === tokenA));
+});
+
+test('compatibility clients without token storage keep remote auth errors and local-choice warnings', async t => {
+  const f = await fixture(t); delete f.platform.token;
+  f.state.matchError = { code: 'AUTH_REQUIRED', error: 'Please connect' };
+  assert.equal((await prepareGame(f.platform, f.project)).code, 'AUTH_REQUIRED');
+  delete f.state.matchError;
   const result = await prepareGame(f.platform, f.project, { features: { cloudSaves: false } });
   assert.equal(result.features.cloudSaves, false); assert.ok(result.preferenceWarning);
   assert.deepEqual(await readdir(f.directory), []);

@@ -38,8 +38,7 @@ async function readPreferences(path) {
     throw error;
   } finally { await handle?.close(); }
 }
-async function preferences(platform, root, choices) {
-  const token = await platform.token();
+async function preferences(platform, root, choices, token) {
   if (!token) throw new Error('No account for saved choices');
   const key = createHash('sha256').update(JSON.stringify([platform.origin, token, root])).digest('hex');
   const directory = platform.directory, path = join(directory, `options-${key}.json`);
@@ -63,16 +62,29 @@ async function preferences(platform, root, choices) {
 // explicitly selected. They never enable services, change code, publish or override live settings.
 export async function prepareGame(platform, projectDirectory, options = {}) {
   if (!isAbsolute(projectDirectory)) return { error: '请提供当前游戏项目的绝对路径。', code: 'INVALID_PROJECT' };
+  const token = typeof platform.token === 'function' ? await platform.token() : null;
+  // One preparation belongs to the account that started it. Never let a credential-file change
+  // switch subsequent reads or move the author's choices into another account's preferences.
+  const client = Object.create(platform);
+  if (token) {
+    client.token = async () => token;
+    client.request = (path, options = {}) => platform.request(path, { ...options, token });
+  }
+  const changed = async () => token && await platform.token() !== token;
+  const accountChanged = () => ({ code: 'ACCOUNT_CHANGED', error: '连接账号已变更，请使用当前账号重新准备游戏；本次选择不会保存到新账号。' });
   const root = await realpath(projectDirectory);
-  const release = await prepareRelease(platform, root, options.gameSlug, options.dockerProject);
+  const release = await prepareRelease(client, root, options.gameSlug, options.dockerProject);
+  if (await changed()) return accountChanged();
   if (release.error || release.code === 'CHOOSE_GAME') return release;
   const [inspection, languageCheck, integrations] = await Promise.all([
     inspectGame(root, options.buildOptions), checkGameLanguages(root),
-    release.gameSlug ? getGameIntegrations(platform, release.gameSlug) : Promise.resolve(null),
+    release.gameSlug ? getGameIntegrations(client, release.gameSlug) : Promise.resolve(null),
   ]);
+  if (await changed()) return accountChanged();
   let choices = {}, preferenceWarning;
-  try { choices = await preferences(platform, root, options.features); }
+  try { choices = await preferences(client, root, options.features, token); }
   catch { preferenceWarning = '本机未能保存功能选择；本次明确选择仍有效，下次可能需要重新确认。'; choices = cleanChoices(options.features); }
+  if (await changed()) return accountChanged();
   const live = integrations?.error ? null : integrations;
   const requested = Object.fromEntries(featureNames.map(name => [name, choices[name] ?? (
     name === 'multilingual' && languageCheck.multilingual || name === 'cloudSaves' && live?.cloudSaves?.enabled || name === 'leaderboards' && live?.leaderboards?.length ? true : null
