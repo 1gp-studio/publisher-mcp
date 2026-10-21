@@ -17,7 +17,7 @@
 ```toml
 [mcp_servers.onegp]
 command = "npx"
-args = ["--yes", "github:1gp-studio/publisher-mcp#v0.7.2"]
+args = ["--yes", "github:1gp-studio/publisher-mcp#v0.7.3"]
 startup_timeout_sec = 60
 tool_timeout_sec = 600
 ```
@@ -31,7 +31,7 @@ tool_timeout_sec = 600
 在终端运行一次（`--scope user` 对你本人的所有项目生效）：
 
 ```sh
-claude mcp add onegp --scope user -- npx --yes github:1gp-studio/publisher-mcp#v0.7.2
+claude mcp add onegp --scope user -- npx --yes github:1gp-studio/publisher-mcp#v0.7.3
 ```
 
 已经装过要升级时，先 `claude mcp remove onegp --scope user`，再运行上面这行。用 `claude mcp list` 可以看到当前装的是哪一份。
@@ -179,6 +179,14 @@ Godot 也使用同一个 `gameSlug` 参数，不需要 `output_directory`。平�
 
 开发时可使用 `ONEGP_PLATFORM_URL` 指向另一 HTTPS 平台，或本机 HTTP localhost/127.0.0.1；凭证按平台分别保存。测试运行 `npm test`，包括真实 MCP stdio 客户端集成测试。
 
+## v0.7.3：默认跟随网站的五种语言
+
+默认推荐目标依次为简体中文、英文、日文、韩文、西班牙文（`zh`、`en`、`ja`、`ko`、`es`）。游戏内文字、游戏名和简介都按这五种目标按需补齐，只翻缺失或过期的内容，跳过原始语言。原始语言不在这五种中时保留原文，并补齐五种目标，不固定要求“另外四种”。
+
+已有繁体中文、巴西葡语、德语、法语和俄语仍可检测、上传、读取状态和更新资料，不会删除或要求重新翻译。`check_game_languages` 的 `siteLanguages` 返回五个默认目标，`supportedGameLanguages` 返回兼容的十种游戏语言；上传工具和 `set_game_details` 接受全部十种语言，名称及简介可只提交需要更新的语言。
+
+更新安装配置到 `v0.7.3` 后重启 MCP 客户端。游戏已经有的多语言实现和用户的原始语言保持不变。
+
 ## v0.7.2：更新游戏时自动走对的路
 
 `prepare_release` 先说明这个游戏是怎么发布的（`channel`：github / local / external / docker / new）和下一步（`nextSteps`），更新时不用再按渠道选提示词：
@@ -199,9 +207,9 @@ Godot 也使用同一个 `gameSlug` 参数，不需要 `output_directory`。平�
 让游戏里的文字跟着玩家在 1GP 网站选的语言走：
 
 1. 发布前 `check_game_languages`。已有多语言：确认打开时先读 `?lang=`；还没有：先问用户要不要做成多语言，同意才改。
-2. 按约定改造（提示词 `make_game_multilingual`）：玩家看到的文字换成键名，写一份原始语言 JSON，接入 SDK 的 `AIMadeGames.i18n`，中日韩俄准备字体，按钮给长文字留余量。
-3. 用你自己的 AI 把原始语言文件翻成其余 9 种语言（zh、zh-Hant、en、es、pt-BR、ja、ko、de、fr、ru），键名一致、占位符原样保留。
-4. 发布后 `upload_game_text` 上传原始语言文件和全部翻译，`get_game_text_status` 核对，`set_game_details` 设置各语言游戏名（先给用户看）。
+2. 按约定改造（提示词 `make_game_multilingual`）：玩家看到的文字换成键名，写一份原始语言 JSON，接入 SDK 的 `AIMadeGames.i18n`，中日韩准备字体并保留已有其他语言字体，按钮给长文字留余量。
+3. 用你自己的 AI 按当前网站目标 `zh`、`en`、`ja`、`ko`、`es` 补齐缺失或过期的翻译，跳过原始语言；原文不在目标列表中时保留原文并补齐全部五个目标。键名一致、占位符原样保留，已有其他语言继续保留。
+4. 发布后 `upload_game_text` 上传改过的原始语言文件和本次补齐的翻译，`get_game_text_status` 核对，`set_game_details` 按需补齐五个目标语言的游戏名和简介（先给用户看）。
 
 作者在 1GP 开发者中心手改过的条目不会被上传覆盖；原文改了，旧翻译会标成需要重翻，只重翻改过的条目。平台开通翻译时，缺的条目也会由平台补上。
 
@@ -288,6 +296,6 @@ MCP 自动移除自己创建的临时镜像标签，保留私有临时目录中�
 - `prepare_github_publish`：传入 `repo`，可选 `kind`、`ref`、`check_result`，根据检查结果准备指定仓库。保持 GitHub 渠道，不静默改为本地上传或 Docker；完成后回原表单重新检查。
 - `prepare_docker_publish`：固定 1GP 团队运营的 Docker/EC2，检查权限和运行限制，通过现有镜像上传及发布工具完成。
 - `update_game`：更新已发布的游戏（传入 `gameSlug`），按 `prepare_release` 返回的发布方式走，不用按渠道选提示词。
-- `make_game_multilingual`：把游戏里的文字做成多语言（键名 + 原始语言文件 + SDK），用你自己的 AI 翻好全部语言后上传。
+- `make_game_multilingual`：把游戏里的文字做成多语言（键名 + 原始语言文件 + SDK），用你自己的 AI 按需补齐五个默认目标语言后上传，保留已有其他语言。
 
 所有新增托管使用 1GP 的 Vercel/AWS 资源，不要求发布者的云账号或密钥。现成链接保持原站托管。手动选择渠道后，不兼容时解释原因并建议切换，不能自行更换。只做必要部署适配，不擅自重写玩法、协议或存储；部署 ready 不代表多人玩法已验证。

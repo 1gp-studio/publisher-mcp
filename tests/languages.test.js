@@ -2,19 +2,103 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp,writeFile,rm,mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { checkGameLanguages,uploadGameText } from '../src/languages.js';
+import { join,resolve } from 'node:path';
+import { createServer } from 'node:http';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { Platform } from '../src/platform.js';
+import { checkGameLanguages,uploadGameText,siteLanguages,supportedGameLanguages } from '../src/languages.js';
+import { automaticPublishPrompt,localPublishPrompt,dockerPublishPrompt,multilingualPrompt,updateGamePrompt } from '../src/publishing-prompts.js';
+import packageInfo from '../package.json' with { type: 'json' };
+
+const targets=['zh','en','ja','ko','es'];
+const compatible=['zh','zh-Hant','en','es','pt-BR','ja','ko','de','fr','ru'];
 test('language check reads language files and ?lang= handling without running code',async t=>{
  const dir=await mkdtemp(join(tmpdir(),'langs-'));t.after(()=>rm(dir,{recursive:true,force:true}));
  await mkdir(join(dir,'locales'));await writeFile(join(dir,'locales/zh-CN.json'),'{"start":"开始"}');await writeFile(join(dir,'locales/en.json'),'{"start":"Start"}');
  await writeFile(join(dir,'game.js'),"const lang=navigator.language;button.textContent=t('start');");
  const found=await checkGameLanguages(dir);
  assert.equal(found.multilingual,true);assert.deepEqual(found.languages.sort(),['en','zh']);
+ assert.deepEqual(found.siteLanguages,targets);assert.deepEqual(found.supportedGameLanguages,compatible);
  assert.equal(found.signals.readsLangParam,false);assert.equal(found.signals.readsBrowserLanguage,true);
  assert.match(found.nextSteps[0],/\?lang=/);
  const plain=await mkdtemp(join(tmpdir(),'plain-'));t.after(()=>rm(plain,{recursive:true,force:true}));
  await writeFile(join(plain,'index.html'),'<button>开始游戏</button>');
  const none=await checkGameLanguages(plain);assert.equal(none.multilingual,false);assert.match(none.nextSteps[0],/要不要做成多语言/);
+});
+
+test('publishing prompts recommend only the five targets while retaining originals outside them',()=>{
+ assert.deepEqual(siteLanguages,targets);assert.deepEqual(supportedGameLanguages,compatible);
+ for(const prompt of [automaticPublishPrompt,localPublishPrompt,dockerPublishPrompt,multilingualPrompt,updateGamePrompt('my-game')]){
+  assert.match(prompt,/check_game_languages/);
+  assert.ok(prompt.includes(targets.join('、')));
+  assert.match(prompt,/缺失或过期/);
+  assert.match(prompt,/原始语言不在这五种中时保留原文/);
+  assert.match(prompt,/已有其他语言/);
+  assert.match(prompt,/五种目标语言的游戏名和简介/);
+  assert.doesNotMatch(prompt,/(?:其余|其他|另外)\s*(?:9|九|4|四)\s*种/);
+ }
+});
+
+test('MCP stdio keeps all ten game languages usable with five default targets and partial metadata',async t=>{
+ const dir=await mkdtemp(join(tmpdir(),'mcp-languages-'));t.after(()=>rm(dir,{recursive:true,force:true}));
+ await mkdir(join(dir,'locales'));
+ await writeFile(join(dir,'locales/ru.json'),JSON.stringify({start:'Начать'}));
+ const calls=[];
+ const status=compatible.map(locale=>({locale,state:'ready',total:1,done:1,missing:[],stale:[],edited:0}));
+ const http=createServer((req,res)=>{
+  let text='';req.on('data',chunk=>text+=chunk);req.on('end',()=>{
+   calls.push({method:req.method,path:req.url,body:text?JSON.parse(text):undefined});
+   res.setHeader('Content-Type','application/json');
+   res.end(JSON.stringify(req.method==='GET'?{engine:null,status}:{ok:true}));
+  });
+ });
+ await new Promise(resolve=>http.listen(0,'127.0.0.1',resolve));t.after(()=>new Promise(resolve=>http.close(resolve)));
+ const origin=`http://127.0.0.1:${http.address().port}`;
+ const platform=new Platform({origin,configDirectory:join(dir,'.config','1gp-studio')});
+ await mkdir(platform.directory,{recursive:true,mode:0o700});
+ await writeFile(platform.file,JSON.stringify({token:'b'.repeat(64)}),{mode:0o600});
+ const client=new Client({name:'1gp-language-test',version:'1.0.0'});
+ await client.connect(new StdioClientTransport({command:process.execPath,args:[resolve('src/server.js')],env:{...process.env,ONEGP_PLATFORM_URL:origin,HOME:dir,USERPROFILE:dir},stderr:'pipe'}));
+ t.after(()=>client.close());
+ assert.equal(client.getServerVersion().version,packageInfo.version);
+ const check=JSON.parse((await client.callTool({name:'check_game_languages',arguments:{project_directory:dir}})).content[0].text);
+ assert.deepEqual(check.languages,['ru']);
+ assert.deepEqual(check.siteLanguages,targets);
+ assert.deepEqual(check.supportedGameLanguages,compatible);
+ assert.ok(check.nextSteps.some(step=>step.includes('原始语言不在这五种中时保留原文')));
+
+ const translations=compatible.filter(locale=>locale!=='ru').map(locale=>({locale,path:`locales/${locale}.json`}));
+ for(const translation of translations)await writeFile(join(dir,translation.path),JSON.stringify({start:`Start ${translation.locale}`}));
+ const all=JSON.parse((await client.callTool({name:'check_game_languages',arguments:{project_directory:dir}})).content[0].text);
+ assert.deepEqual([...all.languages].sort(),[...compatible].sort(),'language detection must not lose files outside the website targets');
+ const uploaded=await client.callTool({name:'upload_game_text',arguments:{project_directory:dir,gameSlug:'my-game',original:{locale:'ru',path:'locales/ru.json'},translations}});
+ assert.equal(uploaded.isError,false);
+ const data=JSON.parse(uploaded.content[0].text);
+ assert.deepEqual(data.uploaded,['ru',...translations.map(item=>item.locale)]);
+ assert.deepEqual(data.status.map(item=>item.locale),compatible,'upload status preserves all compatible game languages');
+ assert.deepEqual(calls.filter(call=>call.method==='PUT').map(call=>call.body.locale),data.uploaded);
+ const read=await client.callTool({name:'get_game_text_status',arguments:{gameSlug:'my-game'}});
+ assert.equal(read.isError,false);
+ assert.deepEqual(JSON.parse(read.content[0].text).status.map(item=>item.locale),compatible);
+
+ for(const metadata of [
+  {titles:{fr:'Titre français'},descriptions:{ru:'Описание игры'},languages:compatible},
+  {titles:Object.fromEntries(targets.map(locale=>[locale,`Name ${locale}`]))},
+  {descriptions:{en:'e'.repeat(2000),ja:'j'.repeat(4000),fr:'f'.repeat(4000)}},
+ ]){
+  const result=await client.callTool({name:'set_game_details',arguments:{gameSlug:'my-game',...metadata}});
+  assert.equal(result.isError,false,'selected names must not require every compatible language');
+  assert.deepEqual(calls.at(-1),{method:'PATCH',path:'/api/developer/language-files/my-game',body:metadata});
+ }
+ const before=calls.length;
+ const invalid=await client.callTool({name:'set_game_details',arguments:{gameSlug:'my-game',titles:{it:'Unsupported'}}});
+ assert.equal(invalid.isError,true);assert.equal(calls.length,before,'unknown locale keys are still rejected before sending');
+ const tooLong=await client.callTool({name:'set_game_details',arguments:{gameSlug:'my-game',descriptions:{en:'e'.repeat(2001)}}});
+ assert.equal(tooLong.isError,true);assert.equal(calls.length,before,'English must fit the author English field before sending');
+ const prompt=await client.getPrompt({name:'make_game_multilingual'});
+ assert.ok(prompt.messages[0].content.text.includes(targets.join('、')));
+ assert.doesNotMatch(prompt.messages[0].content.text,/(?:其余|其他)\s*9\s*种/);
 });
 test('game text upload sends the original first, then translations as the creator\'s AI, and stays inside the project',async t=>{
  const dir=await mkdtemp(join(tmpdir(),'upload-'));t.after(()=>rm(dir,{recursive:true,force:true}));
