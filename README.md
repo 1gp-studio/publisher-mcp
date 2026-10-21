@@ -17,7 +17,7 @@
 ```toml
 [mcp_servers.onegp]
 command = "npx"
-args = ["--yes", "github:1gp-studio/publisher-mcp#v0.7.0"]
+args = ["--yes", "github:1gp-studio/publisher-mcp#v0.7.1"]
 startup_timeout_sec = 60
 tool_timeout_sec = 600
 ```
@@ -31,7 +31,7 @@ tool_timeout_sec = 600
 在终端运行一次（`--scope user` 对你本人的所有项目生效）：
 
 ```sh
-claude mcp add onegp --scope user -- npx --yes github:1gp-studio/publisher-mcp#v0.7.0
+claude mcp add onegp --scope user -- npx --yes github:1gp-studio/publisher-mcp#v0.7.1
 ```
 
 已经装过要升级时，先 `claude mcp remove onegp --scope user`，再运行上面这行。用 `claude mcp list` 可以看到当前装的是哪一份。
@@ -166,7 +166,7 @@ Godot 也使用同一个 `gameSlug` 参数，不需要 `output_directory`。平�
 | check_game_languages(project_directory) | 只读检查游戏有没有做多语言（语言文件、`?lang=`、浏览器语言、1GP SDK），返回检测到的语言、下一步和接入约定 |
 | upload_game_text(project_directory, gameSlug, original?, translations?) | 上传游戏自己的原始语言文件和你的 AI 翻好的各语言文件（`{"键名": "文字"}`），平台在 `/i18n/<游戏>/<语言>.json` 提供给玩家 |
 | get_game_text_status(gameSlug) | 每种语言：已翻译、缺哪些键、哪些键的原文改过要重翻 |
-| set_game_details(gameSlug, titles?, languages?) | 设置各语言游戏名（作者自己的，平台不覆盖）；没用平台语言文件、自带多语言的游戏也可告知支持哪些语言 |
+| set_game_details(gameSlug, titles?, descriptions?, languages?) | 设置各语言游戏名和简介（作者自己的，平台不覆盖；留空交回平台翻译）；没用平台语言文件、自带多语言的游戏也可告知支持哪些语言 |
 
 需要指定静态输出时返回 `OUTPUT_REQUIRED`，需要完整服务端产物时返回 `VERCEL_OUTPUT_REQUIRED`。错误包含 `LOCAL_BUILD_FAILED`、`UNSUPPORTED_BUILD`、`POTENTIAL_SECRET`、`AUTH_REQUIRED`，`publish_link` 另有 `INVALID_URL`、`TITLE_REQUIRED`；连不上平台时为 `NETWORK_ERROR`。遇到网络不确定的发布结果不要自动重复提交，可到网站「我的发布」查看。
 
@@ -177,6 +177,10 @@ Godot 也使用同一个 `gameSlug` 参数，不需要 `output_directory`。平�
 平台目前限制全站同时 2 个构建、每个账号最多 50 个作品，不设每日次数限制。账号邮箱验证由 Supabase 负责；平台管理员必须配置生产邮件服务，才能支持组织外用户收取登录邮件。1GP 托管团队的 Vercel 套餐及运行限制仍适用；不占用用户个人 Vercel 账号。GitHub 来源继续遵守仓库授权与构建限制。
 
 开发时可使用 `ONEGP_PLATFORM_URL` 指向另一 HTTPS 平台，或本机 HTTP localhost/127.0.0.1；凭证按平台分别保存。测试运行 `npm test`，包括真实 MCP stdio 客户端集成测试。
+
+## v0.7.1
+
+`set_game_details` 新增 `descriptions`：各语言的游戏简介，先给用户看再上传；上传的算作者自己的，平台翻译不会覆盖，留空就交回平台翻译。安装方式不变，把版本号改成 `v0.7.1` 后重启 MCP 客户端即可。
 
 ## v0.7.0：游戏内文字多语言
 

@@ -26,3 +26,8 @@ test('game text upload sends the original first, then translations as the creato
  const outside=await uploadGameText(platform,dir,'my-game',{locale:'zh',path:'../secret.json'});
  assert.match(outside.error,/项目目录/);
 });
+test('game details send names and descriptions per language in one request',async()=>{
+ const { setGameDetails }=await import('../src/languages.js');
+ const calls=[];await setGameDetails({request:async(path,options)=>{calls.push([path,options]);return {ok:true};}},'my-game',{titles:{ja:'猫'},descriptions:{ja:'釣りをする猫'}});
+ assert.deepEqual(calls,[['/api/developer/language-files/my-game',{method:'PATCH',body:{titles:{ja:'猫'},descriptions:{ja:'釣りをする猫'}}}]]);
+});

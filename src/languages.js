@@ -68,7 +68,7 @@ export async function checkGameLanguages(projectDirectory){
     if(!signals.readsLangParam)nextSteps.push('游戏已有多语言，但打开时没读 ?lang=：改成先读 ?lang=（或 AIMadeGames.lang()），再看浏览器语言。');
     nextSteps.push(`发布后用 set_game_details 把支持的语言（${languages.join(', ')||'检查代码确认'}）告诉平台；要补齐其他语言，可以改用平台多语言（键名 + 原始语言文件 + AIMadeGames.i18n），再 upload_game_text。`);
   }else nextSteps.push('还没做多语言。先问用户「要不要做成多语言」；同意后按 convention 改造：玩家看到的文字换成键名，写一份原始语言 JSON，接 AIMadeGames.i18n；用你自己的能力把这份文件翻成其他 9 种语言，发布后 upload_game_text 上传。用户不同意就照原样发布。');
-  nextSteps.push('发布后用 set_game_details 上传各语言游戏名（短、像游戏名，不逐字直译；专有名词可保留）。');
+  nextSteps.push('发布后用 set_game_details 上传各语言游戏名（短、像游戏名，不逐字直译；专有名词可保留）和各语言简介（意思和语气不变、读起来自然），先给用户看。');
   return {multilingual,languages,languageFiles:files.slice(0,40),signals,scannedFiles:scanned,siteLanguages,nextSteps,convention};
 }
 export const convention=[
@@ -109,6 +109,6 @@ export async function gameTextStatus(platform,gameSlug){
   if(data.error)return data;
   return {platformTranslation:data.engine??null,status:(data.status??[]).map(item=>({locale:item.locale,state:item.state,total:item.total,done:item.done,missing:item.missing,stale:item.stale,editedByCreator:item.edited}))};
 }
-export async function setGameDetails(platform,gameSlug,{titles,languages}){
-  return platform.request(`/api/developer/language-files/${encodeURIComponent(gameSlug)}`,{method:'PATCH',body:{...(titles?{titles}:{}),...(languages?{languages}:{})}});
+export async function setGameDetails(platform,gameSlug,{titles,descriptions,languages}){
+  return platform.request(`/api/developer/language-files/${encodeURIComponent(gameSlug)}`,{method:'PATCH',body:{...(titles?{titles}:{}),...(descriptions?{descriptions}:{}),...(languages?{languages}:{})}});
 }
