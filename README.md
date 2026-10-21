@@ -17,7 +17,7 @@
 ```toml
 [mcp_servers.onegp]
 command = "npx"
-args = ["--yes", "github:1gp-studio/publisher-mcp#v0.7.4"]
+args = ["--yes", "github:1gp-studio/publisher-mcp#v0.8.0"]
 startup_timeout_sec = 60
 tool_timeout_sec = 600
 ```
@@ -31,7 +31,7 @@ tool_timeout_sec = 600
 在终端运行一次（`--scope user` 对你本人的所有项目生效）：
 
 ```sh
-claude mcp add onegp --scope user -- npx --yes github:1gp-studio/publisher-mcp#v0.7.4
+claude mcp add onegp --scope user -- npx --yes github:1gp-studio/publisher-mcp#v0.8.0
 ```
 
 已经装过要升级时，先 `claude mcp remove onegp --scope user`，再运行上面这行。用 `claude mcp list` 可以看到当前装的是哪一份。
@@ -47,11 +47,12 @@ claude mcp add onegp --scope user -- npx --yes github:1gp-studio/publisher-mcp#v
 1. 告诉 AI（Codex / Claude Code）：**连接 1GP 发布平台**。调用 `connect_platform` 后，用户本人打开返回的授权链接，登录并点击允许。对照页面与工具的客户端指纹。
 2. 打开游戏项目，告诉 AI：**检查当前游戏，支持的话发布到 1GP，把试玩链接给我。**
 3. MCP 自动读取名字和介绍（Vite 项目读 package.json，Godot 项目读 project.godot）以及要上传的文件；未提供介绍时使用中性的默认介绍，不推断玩法。
-4. `publish_game` 返回构建 ID；每隔至少 10 秒调用 `get_publish_status`，直到 `ready` 或 `failed`。只有 ready 表示发布成功。
+4. `prepare_game` 一次返回项目识别、原发布渠道、版本差异、构建检查、语言和已有可选功能。按需构建后发布，复用结果，不重复逐项检查。
+5. 异步发布返回构建 ID 后调用 `wait_for_publish`。每次最多等 45 秒；pending 时继续同一任务，省略 build_id 可恢复当前账号最近任务。只有 ready 表示部署成功，仍需验证实际游戏。
 
 ## 版本号与更新说明（v0.5.0）
 
-每次发布前调用 `prepare_release(project_directory, gameSlug?, docker_project?)`，沿用游戏标识。工具将本地文件哈希与上次成功发布比较，返回新增、修改、删除的路径和版本建议。本地 AI 必须阅读相关代码，有 Git 历史时结合上次 sourceCommit 的 diff，按玩法、关卡、修复、平衡、界面和资源等主要方面精简概括。文件名不能证明具体玩法变化，没有基线时明确说明，不能编造差异。
+推荐每次发布前调用 `prepare_game(project_directory, gameSlug?, docker_project?)`，其中已包含 `prepare_release` 的结果，沿用游戏标识。只有单独查看版本差异时才需要 `prepare_release`。工具将本地文件哈希与上次成功发布比较，返回新增、修改、删除的路径和版本建议。本地 AI 必须阅读相关代码，有 Git 历史时结合上次 sourceCommit 的 diff，按玩法、关卡、修复、平衡、界面和资源等主要方面精简概括。文件名不能证明具体玩法变化，没有基线时明确说明，不能编造差异。
 
 - 首发 `1.0.0`；大规模玩法重做或存档不兼容升主版本；新玩法/关卡升次版本；修复、平衡或纯资源变化升补丁版本。
 - 作者可以修改建议。所有发布工具需要 `release`，格式示例：`{"version":"1.1.0","title":"新关卡","notes":"关卡：新增森林挑战。修复：解决结算卡住。","changeType":"minor"}`。实际内容必须来自当前项目，`changeType` 为 `major`、`minor`、`patch` 或 `assets`。
@@ -71,7 +72,7 @@ Vercel 发布同时包含网页和必要的服务端产物，只需 `connect_pla
 
 上述参数用于 `build_vercel_game`。工具执行项目已有 `build` 脚本，用 esbuild 将固定路径（含嵌套路径）的 API 和依赖打包，兼容 Node `req/res` 函数或默认导出的 `http.Server`。保留 `vercel.json` 中受支持的同源 `rewrites`、函数 `maxDuration`/`memory`；支持 `/api/:path*` → `/api/index?__path=/api/:path*` 和 `/healthz` 等规则，原查询参数继续保留。不会执行 API 入口、读取或内联 `process.env` 的值，也不改游戏玩法与存储。`ws` 的可选原生加速模块使用其官方 JavaScript 回退，避免将本机二进制带入 Linux 函数。
 
-构建和完整校验成功后才写入工具管理的 `.1gp/vercel-output`，不会覆盖同名的未受管理目录；失败保留上次成功产物并清理临时目录。检查和发布可以自动识别该目录，也可明确使用工具返回的 `deployment_target` 和 `vercel_output_directory`。这一步不连接云端、不上传、不发布。之后调用 `prepare_release` 并提供版本说明，再 `publish_game`。
+构建和完整校验成功后才写入工具管理的 `.1gp/vercel-output`，不会覆盖同名的未受管理目录；失败保留上次成功产物并清理临时目录。检查和发布可以自动识别该目录，也可明确使用工具返回的 `deployment_target` 和 `vercel_output_directory`。这一步不连接云端、不上传、不发布。已有 `prepare_game` 结果时直接沿用版本差异，提供版本说明后 `publish_game`；不要再传 build_script 重复构建，源码改变时重查相关部分。
 
 其他 npm 静态前端可给 `build_vercel_game` 传 `frontend_output_directory` 和可选的 `build_script`；仅给目录则使用已有前端产物。Next/其他 SSR、动态 API 文件名（如 `[id].ts`）、原生依赖、依赖 `import.meta.url` 的入口或其他不受支持配置会明确停止，需要专用框架适配器或 1GP Docker。
 
@@ -156,6 +157,11 @@ Godot 也使用同一个 `gameSlug` 参数，不需要 `output_directory`。平�
 
 | 工具 | 用途 |
 | --- | --- |
+| prepare_game(project_directory, gameSlug?, docker_project?, features?) | 统一准备：识别游戏、沿用渠道、版本差异、构建/语言检查和可选功能；记住作者明确选择，不自动启用 |
+| get_game_integrations(gameSlug, feature?, boardId?) | 读取自己游戏的云存档/榜单配置，可获取带真实 ID 与玩家平台 origin 的专属接入说明 |
+| configure_cloud_saves(gameSlug, enabled, schemaVersion) | 作者选择后设置云存档，返回专属说明；不读取玩家存档、不修改游戏代码 |
+| configure_leaderboard(gameSlug, configuration) | 创建或更新榜单；创建使用稳定 key 幂等重试，更新保留既有成绩与计分规则 |
+| wait_for_publish(build_id?, wait_seconds?) | 等待或恢复当前账号同一个发布任务，最多 45 秒，不自动重新发布 |
 | prepare_release(project_directory, gameSlug?, docker_project?) | 对比上次成功发布并获取版本建议，不构建或发布 |
 | build_vercel_game(project_directory, frontend_output_directory?, build_script?) | 在本地将 Vite/npm 静态前端和 API 打包成完整 Vercel 产物，无需云登录，不上传或部署 |
 | inspect_game(project_directory, deployment_target?, vercel_output_directory?, output_directory?, build_script?) | 只读检测当前绝对路径，返回支持情况及构建方式（vercel-output / web-static / godot-web） |
@@ -176,11 +182,22 @@ Godot 也使用同一个 `gameSlug` 参数，不需要 `output_directory`。平�
 
 ## 授权与限制
 
-本地凭证保存在 `~/.config/1gp-studio/`，目录权限 0700，文件权限 0600。平台仅保存 SHA-256 哈希。凭证不会通过工具结果或浏览器 URL 输出。授权 90 天有效，仅允许发布和查询自己的构建；在网站「我的发布」撤销后，再运行 connect_platform 可重新连接。
+本地凭证保存在 `~/.config/1gp-studio/`，目录权限 0700，文件权限 0600。平台仅保存 SHA-256 哈希。凭证不会通过工具结果或浏览器 URL 输出。授权 90 天有效，可发布和管理自己游戏的构建、页面信息、翻译、封面及云存档/排行榜设置，不能读取玩家存档或代玩家提交成绩；在网站「我的发布」撤销后，再运行 connect_platform 可重新连接。
 
 平台目前限制全站同时 2 个构建、每个账号最多 50 个作品，不设每日次数限制。账号邮箱验证由 Supabase 负责；平台管理员必须配置生产邮件服务，才能支持组织外用户收取登录邮件。1GP 托管团队的 Vercel 套餐及运行限制仍适用；不占用用户个人 Vercel 账号。GitHub 来源继续遵守仓库授权与构建限制。
 
 开发时可使用 `ONEGP_PLATFORM_URL` 指向另一 HTTPS 平台，或本机 HTTP localhost/127.0.0.1；凭证按平台分别保存。测试运行 `npm test`，包括真实 MCP stdio 客户端集成测试。
+
+## v0.8.0：统一准备与按需接入
+
+- `prepare_game` 合并原先找游戏、准备版本、检查构建、检查语言和查询可选功能的准备步骤。`features` 可记录作者对 `multilingual`、`cloudSaves`、`leaderboards` 的明确选择，按平台、账号和本地项目隔离；未选择为 null，不等于同意，false 也不会关闭已有功能。现有单项工具保留兼容。
+- 云存档和排行榜独立可选。`get_game_integrations` 查询当前配置；选择后用 `configure_cloud_saves` 或 `configure_leaderboard` 配置并取得真实游戏/榜单 ID 与接入说明。没有游戏 ID 时须先发布，接入请求保持关闭。
+- 榜单创建要求稳定 key；相同配置重试复用原榜单，不同配置返回冲突。更新只能修改名称、说明和启用状态，不重建榜单或清空成绩。云存档格式版本默认沿用，升级需要游戏实现迁移。
+- 配置只解决平台设置，AI 仍需修改游戏、运行测试并在平台播放器验证。播放器的精确父窗口 origin 使用返回的 `platformOrigin`，不能使用 MCP 连接地址代替。作者发布凭证不能放进游戏，也不能作为玩家会话凭证。
+- `upload_game_text` 在首笔写入前校验整个批次，按已验证快照上传。仅上传译文时读取平台原文，缺少原文返回 `ORIGINAL_REQUIRED`；不会绕过占位符、换行、键名和排版检查。原文或各译文旁可提供 `.limits.json`。`force` 只允许绕过文字一致性/排版问题，不能绕过格式、大小或路径安全限制。返回最终状态，无须再固定调用一次状态查询。
+- `wait_for_publish` 自动等待并记录任务，中断或断网后恢复同一 ID；不自动重发。任务和功能选择只保存在本机用户配置目录，不含原始 token。已有授权直接沿用，安装说明只在首次安装或升级时使用。
+
+升级安装配置到 `v0.8.0` 并重启 MCP 客户端。平台作者接口需同时支持此版本；旧服务器返回错误时先升级平台，不能据此把已有功能当作关闭。
 
 ## v0.7.4：自己找游戏、译文检查、各语言封面
 
@@ -309,7 +326,9 @@ MCP 自动移除自己创建的临时镜像标签，保留私有临时目录中�
 - `publish_local_artifacts`：固定本地 API 上传；已有产物先验证复用，没有则补齐构建，不要求网页手动上传。
 - `prepare_github_publish`：传入 `repo`，可选 `kind`、`ref`、`check_result`，根据检查结果准备指定仓库。保持 GitHub 渠道，不静默改为本地上传或 Docker；完成后回原表单重新检查。
 - `prepare_docker_publish`：固定 1GP 团队运营的 Docker/EC2，检查权限和运行限制，通过现有镜像上传及发布工具完成。
-- `update_game`：更新已发布的游戏（传入 `gameSlug`），按 `prepare_release` 返回的发布方式走，不用按渠道选提示词。
+- `update_game`：更新已发布的游戏（传入 `gameSlug`），按 `prepare_game` 返回的发布方式走，不用按渠道选提示词。
+- `add_cloud_saves`：按作者选择复用或开启云存档，读取真实配置，指导接入并验证存档/恢复逻辑；不会顺带开启排行榜。
+- `add_leaderboard`：按作者选择复用或创建榜单，明确计分规则，指导接入真实开局/结算流程；不会顺带开启云存档。
 - `make_game_multilingual`：把游戏里的文字做成多语言（键名 + 原始语言文件 + SDK），用你自己的 AI 按需补齐五个默认目标语言后上传，保留已有其他语言。
 
 所有新增托管使用 1GP 的 Vercel/AWS 资源，不要求发布者的云账号或密钥。现成链接保持原站托管。手动选择渠道后，不兼容时解释原因并建议切换，不能自行更换。只做必要部署适配，不擅自重写玩法、协议或存储；部署 ready 不代表多人玩法已验证。

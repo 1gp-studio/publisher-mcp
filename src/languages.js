@@ -1,5 +1,5 @@
 import { readFile,readdir,lstat,realpath } from 'node:fs/promises';
-import { validateGameText } from './text-check.js';
+import { prepareGameText } from './text-check.js';
 import { fontCoverage } from './fonts.js';
 import { resolve,isAbsolute,join,relative,sep,basename } from 'node:path';
 
@@ -94,44 +94,66 @@ export const convention=[
   '长度上限：在原始语言文件旁放 <文件名>.limits.json（如 zh.limits.json：{"start": 12, "*": 40}），按显示宽度算（中日韩字算 2，其他算 1）；validate_game_text 会检查。',
 ].join('\n');
 
-async function readEntries(directory,path){
-  const data=JSON.parse(await projectFile(directory,path));
-  if(!flatStrings(data))throw new Error(`${path} 要是 {"键名": "文字"} 的 JSON 对象。`);
-  return data;
-}
 // Upload the game's own file, then each translation (marked as made by the creator's AI).
 export async function uploadGameText(platform,projectDirectory,gameSlug,original,translations=[],{force=false,separators=[]}={}){
-  if(!isAbsolute(projectDirectory))return {error:'请提供当前游戏项目的绝对路径。'};
-  let directory;try{directory=await realpath(resolve(projectDirectory));}catch{return {error:'无法读取项目目录。'};}
-  // Checked first (validate_game_text): problems are listed, and nothing is uploaded until they are fixed.
-  let check=null;
-  if(original&&translations.length){
-    check=await validateGameText(directory,original,translations,{separators});
-    if(check.error)return check;
-    if(!check.ok&&!force)return {error:'译文检查没通过，先修好再上传（validate_game_text 的结果见 errors）。',code:'TEXT_CHECK_FAILED',...check};
-  }
   const path=`/api/developer/language-files/${encodeURIComponent(gameSlug)}`,uploaded=[],titles={filled:[],conflicts:[]};
+  const fail=(error,failed)=>({...error,uploaded,failed:error.failed??failed});
+  if(!isAbsolute(projectDirectory))return fail({error:'请提供当前游戏项目的绝对路径。'},'files');
+  let directory;try{directory=await realpath(resolve(projectDirectory));}catch{return fail({error:'无法读取项目目录。'},'files');}
+  if(!Array.isArray(translations)||translations.length>supportedGameLanguages.length)return fail({error:'译文列表格式不对。'},'files');
+  if(!original&&!translations.length)return fail({error:'请提供原始语言文件或至少一份译文。',code:'NO_FILES'},'files');
+  if(original&&!supportedGameLanguages.includes(original.locale))return fail({error:'原始语言代码不受支持。',code:'INVALID_LANGUAGE_FILE'},'original');
+  const seen=new Set();
+  for(const item of translations){
+    if(!item||!supportedGameLanguages.includes(item.locale))return fail({error:'译文语言代码不受支持。',code:'INVALID_LANGUAGE_FILE'},item?.locale??'translation');
+    if(seen.has(item.locale))return fail({error:`译文语言重复：${item.locale}`,code:'DUPLICATE_LOCALE'},item.locale);
+    if(item.locale===original?.locale)return fail({error:'译文语言不能和原始语言相同。',code:'ORIGINAL_CONFLICT'},item.locale);
+    seen.add(item.locale);
+  }
+  // The remote response is data only: use the registered original's entries, never any remote path.
+  let source=original?{locale:original.locale,path:original.path}:null;
+  if(!source){
+    try{
+      const current=await platform.request(path);
+      if(!current||typeof current!=='object')return fail({error:'平台原文读取失败。',code:'PLATFORM_ERROR'},'original');
+      if(current.error)return fail(current,'original');
+      const originals=Object.entries(current.files??{}).filter(([,file])=>file?.source==='original');
+      if(!originals.length)return fail({error:'平台还没有登记原文。请把原始语言文件和译文一起上传。',code:'ORIGINAL_REQUIRED'},'original');
+      if(originals.length!==1)return fail({error:'平台存在多份原文，请先确认唯一的原始语言。',code:'ORIGINAL_CONFLICT'},'original');
+      const [locale,file]=originals[0];
+      source={locale,entries:file.entries};
+    }catch(error){return fail({error:error.message,code:'ORIGINAL_READ_FAILED'},'original');}
+  }
+  // Read every local file and validate every upload before writing any of them. Upload the same
+  // snapshots we checked, even if a later filesystem edit occurs while requests are in flight.
+  const prepared=await prepareGameText(directory,source,translations,{separators});
+  if(prepared.error)return fail(prepared,'files');
+  const check=prepared.check;
+  if(!check.ok&&!force)return fail({error:'译文检查没通过，先修好再上传（检查结果见 errors）。',code:'TEXT_CHECK_FAILED',...check},check.errors[0]?.locale??'files');
+  const queue=[...(original?[{...prepared.original,kind:'original'}]:[]),...prepared.translations.map(item=>({...item,kind:'translation',by:'ai_creator'}))];
   const note=result=>{if(result.titleSync){titles.filled.push(...(result.titleSync.filled??[]));titles.conflicts.push(...(result.titleSync.conflicts??[]));}};
+  let failed=queue[0]?.locale??'files';
   try{
-    if(original){
-      const result=await platform.request(path,{method:'PUT',body:{locale:original.locale,kind:'original',entries:await readEntries(directory,original.path)}});
-      if(result.error)return {...result,uploaded};
-      uploaded.push(original.locale);note(result);
-    }
-    for(const item of translations){
-      const result=await platform.request(path,{method:'PUT',body:{locale:item.locale,kind:'translation',by:'ai_creator',entries:await readEntries(directory,item.path)}});
-      if(result.error)return {...result,uploaded,failed:item.locale};
+    for(const item of queue){
+      failed=item.locale;
+      const result=await platform.request(path,{method:'PUT',body:item});
+      if(!result||typeof result!=='object')return fail({error:'平台返回异常响应，请查询状态后继续。',code:'PLATFORM_ERROR'},failed);
+      if(result.error)return fail(result,failed);
       uploaded.push(item.locale);note(result);
     }
-  }catch(error){return {error:error.message,uploaded};}
-  return {ok:true,uploaded,
-    // meta.title fills a language's game name the platform did not have; a different one is only reported.
-    ...(titles.filled.length||titles.conflicts.length?{gameNames:{...titles,next:titles.conflicts.length?'这些语言的 meta.title 和平台上的游戏名不一样，平台没有改。给用户看，确认后用 set_game_details 设置。':'meta.title 已填进这些语言的游戏名。'}}:{}),
-    ...(check?{warnings:check.warnings,fonts:check.fonts}:{}),...await gameTextStatus(platform,gameSlug)};
+    failed='status';
+    const status=await gameTextStatus(platform,gameSlug);
+    if(status.error)return fail(status,failed);
+    return {ok:true,uploaded,
+      // meta.title fills a language's game name the platform did not have; a different one is only reported.
+      ...(titles.filled.length||titles.conflicts.length?{gameNames:{...titles,next:titles.conflicts.length?'这些语言的 meta.title 和平台上的游戏名不一样，平台没有改。给用户看，确认后用 set_game_details 设置。':'meta.title 已填进这些语言的游戏名。'}}:{}),
+      warnings:check.warnings,fonts:check.fonts,...(check.errors.length?{forced:true,errors:check.errors}:{}),...status};
+  }catch(error){return fail({error:error.message},failed);}
 }
 // Per language: up to date, missing keys, or made from an older original (only those need translating).
 export async function gameTextStatus(platform,gameSlug){
   const data=await platform.request(`/api/developer/language-files/${encodeURIComponent(gameSlug)}`);
+  if(!data||typeof data!=='object'||(data.status!==undefined&&!Array.isArray(data.status)))return {error:'平台返回异常状态，请稍后查询。',code:'PLATFORM_ERROR'};
   if(data.error)return data;
   return {platformTranslation:data.engine??null,status:(data.status??[]).map(item=>({locale:item.locale,state:item.state,total:item.total,done:item.done,missing:item.missing,stale:item.stale,editedByCreator:item.edited}))};
 }

@@ -13,11 +13,11 @@ export class Platform {
   async token() {
     try{if((await lstat(this.file)).isSymbolicLink())throw new Error('Invalid credential file');const data=JSON.parse(await readFile(this.file,'utf8'));return /^[a-f0-9]{64}$/.test(data.token)?data.token:null;}catch{return null;}
   }
-  async request(path,{body,token,method=body?'POST':'GET'}={}) {
+  async request(path,{body,token,method=body?'POST':'GET',timeoutMs=175000,signal}={}) {
     const secret=token||await this.token();
     if(!secret)return {code:'AUTH_REQUIRED',error:'请先运行 connect_platform，并由用户在浏览器确认授权。'};
     let response;
-    try{response=await fetch(this.origin+path,{method,headers:{Authorization:`Bearer ${secret}`,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined,redirect:'error',signal:AbortSignal.timeout(175000)});}catch{return {code:'NETWORK_ERROR',error:'无法连接平台，请稍后查询状态；不要自动重复提交发布。'};}
+    try{const timeout=AbortSignal.timeout(Math.max(1,Math.min(175000,Math.trunc(timeoutMs)||175000)));response=await fetch(this.origin+path,{method,headers:{Authorization:`Bearer ${secret}`,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined,redirect:'error',signal:signal?AbortSignal.any([signal,timeout]):timeout});}catch{return {code:'NETWORK_ERROR',error:'无法连接平台，请稍后查询状态；不要自动重复提交发布。'};}
     try{return await response.json();}catch{return {code:'PLATFORM_ERROR',error:`平台返回异常响应 (${response.status})。`};}
   }
   // A multipart upload (a cover picture): same credential, the browser-style form as the body.
