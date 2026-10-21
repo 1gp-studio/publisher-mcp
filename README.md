@@ -6,9 +6,13 @@
 
 需要 Node.js 24+、npm（首次从 GitHub 安装 MCP 时需要 Git）。游戏本身不需要 Git 仓库。这是标准的 stdio MCP 服务，任何 MCP 客户端都能使用。
 
+**只装一次，装在用户级。** 一份安装对你所有的游戏项目都有效，不要在每个游戏项目里各装一份，也不要在游戏目录里新建 `.mcp.json`。已经装过的，只把配置里的版本号改成新版本即可。
+
+如果某个游戏项目的 `.mcp.json` 里还有以前装的 `onegp`（项目级的会盖过用户级，版本停在旧的），请把那一项删掉，以免两个版本打架。
+
 ### Codex
 
-在 Codex 的 `~/.codex/config.toml` 中添加：
+在 Codex 的 `~/.codex/config.toml` 中添加（已有 `[mcp_servers.onegp]` 就只改版本号）：
 
 ```toml
 [mcp_servers.onegp]
@@ -24,23 +28,15 @@ tool_timeout_sec = 600
 
 ### Claude Code
 
-在终端运行（`--scope project` 会写入当前游戏目录的 `.mcp.json`，只对这个项目生效；去掉则只对你本人生效）：
+在终端运行一次（`--scope user` 对你本人的所有项目生效）：
 
 ```sh
-claude mcp add onegp --scope project -- npx --yes github:1gp-studio/publisher-mcp#v0.7.0
+claude mcp add onegp --scope user -- npx --yes github:1gp-studio/publisher-mcp#v0.7.0
 ```
 
-或直接在游戏目录创建 `.mcp.json`：
+已经装过要升级时，先 `claude mcp remove onegp --scope user`，再运行上面这行。用 `claude mcp list` 可以看到当前装的是哪一份。
 
-```json
-{
-  "mcpServers": {
-    "onegp": { "command": "npx", "args": ["--yes", "github:1gp-studio/publisher-mcp#v0.7.0"] }
-  }
-}
-```
-
-重新打开 Claude Code，首次使用项目级配置时确认启用该服务器。首次 npx 下载较慢，可用 `MCP_TIMEOUT=60000 claude` 启动以放宽启动超时。
+重新打开 Claude Code。首次 npx 下载较慢，可用 `MCP_TIMEOUT=60000 claude` 启动以放宽启动超时。
 
 ### 本地源码
 

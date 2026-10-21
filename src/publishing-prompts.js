@@ -1,5 +1,6 @@
 
-const setup = '请按 https://github.com/1gp-studio/publisher-mcp 的说明安装或升级 1GP MCP 到 v0.7.0，连接我的 1GP 账号，在当前本地游戏项目中操作。';
+// The MCP is installed once per user, never per game project (no .mcp.json in the game).
+const setup = '1GP MCP 只装一次，装在用户级，不要在游戏项目里新建 .mcp.json：Claude Code 运行 `claude mcp add onegp --scope user -- npx --yes github:1gp-studio/publisher-mcp#v0.7.0`，Codex 写进 ~/.codex/config.toml 的 [mcp_servers.onegp]（说明见 https://github.com/1gp-studio/publisher-mcp）；已经装过就只把版本号改成 v0.7.0。当前项目的 .mcp.json 里如果还有旧的 onegp，提醒我删掉，以免版本打架。然后连接我的 1GP 账号，在当前本地游戏项目中操作。';
 const hosting = '所有新增托管都使用 1GP 的资源；不要要求我登录 Vercel、AWS 或 ECR，不要创建个人云项目或索取云密钥。不要上传凭证、无关源码或 source map。';
 const languages = '发布前调用 check_game_languages：游戏已经有多语言就确认它先读 ?lang=；还没有就问我要不要做成多语言（make_game_multilingual 的做法），我同意才改。发布后用 set_game_details 给出各语言游戏名（先给我看）。';
 const verify = '发布前调用 prepare_release，依据实际修改准备版本说明；发布后等待任务 ready 或 failed，检查网页和必要接口，给出链接及未验证项。部署成功不代表多人玩法已验证，不要求多人端到端测试作为发布门槛。';
