@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { recordPublishJob, publishWithTracking, waitForPublish, withMaterialNextSteps } from '../src/publish-progress.js';
 import { testSymlink } from './helpers/symlink.js';
+import { updateApprovalGuidance, updateHistoryGuidance } from '../src/update-approval-guidance.js';
 
 const buildA = '11111111-1111-4111-8111-111111111111';
 const buildB = '22222222-2222-4222-8222-222222222222';
@@ -219,6 +220,8 @@ test('ready follow-up covers kit metadata, reviewed media and verification witho
   const ready=withMaterialNextSteps({state:'ready',path:'/games/new-game'});
   assert.equal(ready.gameSlug,'new-game'); assert.equal(ready.workflowComplete,false);
   for(const expected of ['1gp-kit/game.json','get_game_materials','set_game_details(fillMissing=true)','set_game_media','保留已有','作者关闭预览','同一 update_id','纯元数据或媒体补充无需再次部署','complete_game_update','未选择的可选功能不自动开启']) assert.ok(ready.nextSteps.join('\n').includes(expected),expected);
+  assert.ok(ready.nextSteps.join('\n').includes(updateApprovalGuidance.zh));
+  assert.ok(ready.nextSteps.join('\n').includes(updateHistoryGuidance.zh));
   const unknown=withMaterialNextSteps({state:'ready',path:'/games/../other'});
   assert.equal(unknown.gameSlug,undefined); assert.match(unknown.nextSteps.join('\n'),/不编造标识/);
   for(const unchanged of [{state:'building'},{state:'failed'},{state:'ready',error:'Unverified'}]) assert.equal(withMaterialNextSteps(unchanged),unchanged);

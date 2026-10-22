@@ -6,7 +6,7 @@
 
 需要 Node.js 24+、npm（首次从 GitHub 安装 MCP 时需要 Git）。游戏本身不需要 Git 仓库。这是标准的 stdio MCP 服务，任何 MCP 客户端都能使用。
 
-**只装一次，装在用户级。** 一份安装对你所有的游戏项目都有效，不要在每个游戏项目里各装一份，也不要在游戏目录里新建 `.mcp.json`。固定版本不会自行升级：先读取实际 MCP 握手 `serverInfo.version`，或调用 `get_publisher_info`；本流程需要 **0.10.0 或更高兼容版本**。低版本只更新当前客户端已有 1GP 配置里的固定版本，保留其他参数、环境配置和授权凭证；更高兼容版本不降级。
+**只装一次，装在用户级。** 一份安装对你所有的游戏项目都有效，不要在每个游戏项目里各装一份，也不要在游戏目录里新建 `.mcp.json`。固定版本不会自行升级：先读取实际 MCP 握手 `serverInfo.version`，或调用 `get_publisher_info`；本流程需要 **0.11.0 或更高兼容版本**。低版本只更新当前客户端已有 1GP 配置里的固定版本，保留其他参数、环境配置和授权凭证；更高兼容版本不降级。
 
 更新后重新加载 MCP，再核对实际运行版本和工具；客户端无法重载时才请用户重启。配置已经写成新版、工具名称已经存在，都不能证明旧进程已经升级。读不到版本时说明情况，不假定已经完成。
 
@@ -19,7 +19,7 @@
 ```toml
 [mcp_servers.onegp]
 command = "npx"
-args = ["--yes", "github:1gp-studio/publisher-mcp#v0.10.0"]
+args = ["--yes", "github:1gp-studio/publisher-mcp#v0.11.0"]
 startup_timeout_sec = 60
 tool_timeout_sec = 600
 ```
@@ -33,7 +33,7 @@ tool_timeout_sec = 600
 在终端运行一次（`--scope user` 对你本人的所有项目生效）：
 
 ```sh
-claude mcp add onegp --scope user -- npx --yes github:1gp-studio/publisher-mcp#v0.10.0
+claude mcp add onegp --scope user -- npx --yes github:1gp-studio/publisher-mcp#v0.11.0
 ```
 
 已经装过时，用 `claude mcp list` 确认当前生效的配置，只更新其中固定的包版本；保留既有参数和环境配置，不删除 1GP 的授权凭证。上面的命令用于首次安装，不需要每次发布都重新添加。
@@ -51,6 +51,15 @@ claude mcp add onegp --scope user -- npx --yes github:1gp-studio/publisher-mcp#v
 3. MCP 自动读取名字和介绍（Vite 项目读 package.json，Godot 项目读 project.godot）以及要上传的文件；未提供介绍时使用中性的默认介绍，不推断玩法。
 4. `prepare_game` 一次返回项目识别、原发布渠道、版本差异、构建检查、语言、已有可选功能、页面物料 `materials` 和常规物料清单 `promotion`。AI 阅读代码并试玩，补缺的分类、作者主语言标签、主封面、实机截图和短预览；即使不接多语言也检查这些项目。多语言、云存档、排行榜各自可选；首发社区宣传另记为 `features.announcement`。集中解决尚未明确的选项，复用已有授权和检查结果。
 5. 异步发布返回构建 ID 后调用 `wait_for_publish`。每次最多等 45 秒；pending 时继续同一任务，省略 build_id 可恢复当前账号最近任务。只有 ready 表示部署成功，仍需验证实际游戏。
+6. 把最终合并的版本公告 `title`、`notes` 给作者看；作者明确认可具体内容后才 `complete_game_update(..., approved:true)`。发布游戏、技术部署的授权不等于公告认可。同一内容已获明确认可就沿用，不重复询问；改动内容后重新确认。尚未认可时保留草稿和同一 `update_id`，不自动发公告。
+
+## 版本公告确认与删除
+
+先检查 `get_publisher_info` 的 `approved-update-announcements` 和 `update-history-delete` 能力。缺少能力时保留草稿，说明需要更新并重新加载 MCP；不能用旧工具或不带 `approved` 的请求绕过确认。
+
+同一次任务的中间部署只记录在作者的构建历史，最终部署和功能验证完成、作者认可最终说明后，才公开一条合并公告。未确认或暂缓发布时保持待确认；不能为了收尾新建更新组或再部署一次游戏。新版平台也不会替未接入更新组的旧客户端自动生成公开版本公告或社区帖子。
+
+作者要求删除旧版本公告时，先 `get_game_updates({gameSlug})`，按版本、日期和内容核对真实 `reference`；更早记录使用返回的 `nextCursor`。再调用 `delete_game_update({gameSlug,reference,approved:true})`。明确删除同一条的作者指令已经是授权，无需重复确认；不猜编号、不擅自批量清空。删除会移除这条公开版本公告及对应更新帖，保留构建历史、部署产物、在线版本、回退能力和玩家数据。结果不明先查询同一游戏，只重试同一 `reference`；已删除公告不会重建。
 
 ## 版本号与更新说明（v0.5.0）
 
@@ -59,7 +68,7 @@ claude mcp add onegp --scope user -- npx --yes github:1gp-studio/publisher-mcp#v
 - 首发 `1.0.0`；大规模玩法重做或存档不兼容升主版本；新玩法/关卡升次版本；修复、平衡或纯资源变化升补丁版本。
 - 作者可以修改建议。所有发布工具需要 `release.updateId`，沿用 `prepare_game` 返回的真实 `updateId`；`release` 格式示例：`{"updateId":"从 prepare_game 返回的 UUID","version":"1.1.0","title":"新关卡","notes":"关卡：新增森林挑战。修复：解决结算卡住。","changeType":"minor"}`。实际内容必须来自当前项目，`changeType` 为 `major`、`minor`、`patch` 或 `assets`。
 - Docker 发布传入 `project_directory` 才能保存下一次比较的源码清单。只上传路径与 SHA-256 哈希，不上传源码正文；跳过隐藏文件、依赖、常见输出和凭证，比较上限为 1,000 文件、64 MiB。
-- 成功后更新日志才对玩家展示；失败记录留在作者历史中。作者可在历史页修改版本和说明，回退可用的旧 Vercel 部署或 Docker 镜像。回退不恢复玩家存档或外部数据；产物被云服务删除后不可恢复。外部链接不支持回退。
+- 成功部署只保存构建记录；版本公告还需作者明确认可最终内容后才对玩家展示。所有构建尝试保留在作者历史中。作者可在历史页修改版本和说明，回退可用的旧 Vercel 部署或 Docker 镜像。回退不恢复玩家存档或外部数据；产物被云服务删除后不可恢复。外部链接不支持回退。
 - 升级后重启客户端，重新加载工具。下方参数示例用于检查；调用发布时须另加 `release`。
 
 ## 完整游戏 Vercel 发布（v0.6.0）
@@ -157,12 +166,14 @@ Godot 也使用同一个 `gameSlug` 参数，不需要 `output_directory`。平�
 
 ## 工具
 
-当前提供 30 个工具；Docker 构建、上传、查询和发布工具见后文。
+当前提供 35 个工具；Docker 构建、上传、查询和发布工具见后文。
 
 | 工具 | 用途 |
 | --- | --- |
 | prepare_game(project_directory, gameSlug?, docker_project?, features?, update_id?, new_update?) | 统一准备：识别游戏、沿用渠道、版本差异、构建/语言检查和可选功能；记住作者明确选择，不自动启用 |
-| complete_game_update(project_directory, update_id, title, notes) | 最终 ready 并完成网页与功能验证后，把同一更新的所有部署合并为一条开发日志；首发或私有游戏不发更新帖，失败只重试收尾 |
+| complete_game_update(project_directory, update_id, title, notes, approved:true) | 作者认可具体最终内容、最终 ready 并完成验证后，公开一条合并公告；未确认保留草稿，首发或私有游戏不发更新帖，失败只重试同组同内容 |
+| get_game_updates(gameSlug, cursor?) | 查询自己游戏的公开版本公告，返回实际 reference、版本、标题、说明、日期和 nextCursor |
+| delete_game_update(gameSlug, reference, approved:true) | 删除作者指定的公开版本公告及关联更新帖；保留构建、在线版本和回退能力，重复删除幂等 |
 | get_game_integrations(gameSlug, feature?, boardId?) | 读取自己游戏的云存档/榜单配置，可获取带真实 ID 与玩家平台 origin 的专属接入说明 |
 | configure_cloud_saves(gameSlug, enabled, schemaVersion) | 作者选择后设置云存档，返回专属说明；不读取玩家存档、不修改游戏代码 |
 | configure_leaderboard(gameSlug, configuration) | 创建或更新榜单；创建使用稳定 key 幂等重试，更新保留既有成绩与计分规则 |
@@ -224,6 +235,13 @@ MCP **负责检查、上传和保存，不内置浏览器截图、录屏或图�
 
 开发时可使用 `ONEGP_PLATFORM_URL` 指向另一 HTTPS 平台，或本机 HTTP localhost/127.0.0.1；凭证按平台分别保存。测试运行 `npm test`，包括真实 MCP stdio 客户端集成测试。
 
+## v0.11.0：公告确认与更新记录管理
+
+- `complete_game_update` 要求 `approved:true`，只有作者认可具体最终标题和说明才公开；游戏部署授权不代替公告认可，未确认保留草稿和更新组。
+- 新增 `get_game_updates` 和 `delete_game_update`，可查询、分页并删除作者指定的公开版本公告及关联更新帖，保留技术部署历史、在线版本和回退能力。
+- 网站五语提示与 MCP 使用同一份确认规则，并通过 `get_publisher_info` 的 `approved-update-announcements`、`update-history-delete` 能力识别实际支持情况。
+- 需配套平台接口和 `202610220013_game_update_approval.sql` 迁移。数据库同时阻止旧版定时任务自动生成更新帖；先完成平台迁移、验证与部署，再发布 MCP 标签。升级后重载客户端并核对实际运行版本。
+
 ## v0.10.0：自动文字来源与更新补翻
 
 - 新增 `get_game_text_source`、`configure_game_text_source` 和 `approve_game_text_candidates`。按当前公开游戏入口登记 JSON 原文或 HTML/JS/MJS/PCK 来源，沿用现有发布渠道；设置与候选批准分别绑定 revision 和来源指纹，遇到并发变化不会覆盖或自动重试。
@@ -242,7 +260,7 @@ MCP **负责检查、上传和保存，不内置浏览器截图、录屏或图�
 - 封面先整批验证并读取固定快照，再上传；阻止链接逃逸、硬链接、读取期间文件替换或超限。多步操作固定同一账号，失败会保留已完成项目。
 - AI 译文上传带预检原文的语言及哈希，数据库原子检查；原文改变返回 `ORIGINAL_CHANGED`，必须重读并更新译文，不能把旧翻译标成最新。
 - 一次逻辑更新沿用一个 `updateId`。`prepare_game` 仅在本地按账号、平台、项目保存 UUID，首次实际发布才幂等注册服务器更新组；所有渠道的发布都传 `release.updateId`，包括首发取得真实游戏 ID 所需的中间部署、可选功能接入和验证修复。尽量把改动一起做完再发布；仅修改平台文字、翻译或封面，无须新部署。
-- 最终部署 ready 且网页、接口与所选功能验证后，只调用一次 `complete_game_update`，用最终合并说明生成一条开发日志。首发组不发更新帖，私有游戏不向社区发帖。收尾结果不明只重试相同 ID 和内容，不重发游戏；同内容完成重试幂等，已删帖子不复活。成功后清除本地活动组。已注册而未完成的旧组必须显式 `update_id` 恢复；确认是独立新任务才 `new_update=true`，不能把下一次更新悄悄混进旧组。
+- 同一逻辑更新保留一组部署记录；当前流程还要求作者明确认可最终公告内容，最终部署 ready 且网页、接口与所选功能验证后，才调用一次 `complete_game_update(..., approved:true)`。首发组不发更新帖，私有游戏不向社区发帖。未确认保留草稿和原组；收尾结果不明只重试相同 ID 和已认可内容，不重发游戏；同内容完成重试幂等，已删帖子不复活。成功后清除本地活动组。已注册而未完成的旧组必须显式 `update_id` 恢复；确认是独立新任务才 `new_update=true`，不能把下一次更新悄悄混进旧组。
 - `features.announcement` 只记录首发社区宣传意向。`get_game_announcement` 提供资格、`launchReference` 和草稿；AI 与其他发布物料一起展示标题和正文，只有作者明确批准相同内容后才提交 `approved:true`。最终发布 ready 且网页检查通过后，`publish_game_announcement` 发出帖子。重试沿用同一引用并返回原帖，删帖后不自动重发，更新版本不自动发首发宣传帖；发帖失败也不重新发布游戏。
 
 此版本需要配套平台接口和数据库迁移：按序执行 202610220001_mcp_translation_snapshot.sql、202610220002_game_announcements.sql、202610220003_materials_snapshot.sql、202610220004_game_language_owner_writes.sql、202610220005_game_update_sessions.sql、202610220006_publishing_materials.sql（需已有语言文件、短语翻译与社区基础迁移）。它们提供原文指纹检查、首发去重标记、自动物料并发保护、写入时所有权校验、按逻辑更新合并开发日志和媒体上传幂等回执；游戏转交后旧作者的在途写入也会被拒绝。先完成平台验证与部署，再发布 MCP tag；本地版本号更新不代表公开版本已发布。

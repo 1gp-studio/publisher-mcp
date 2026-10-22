@@ -1,5 +1,6 @@
 import { extname } from 'node:path';
 import { inspectProjectFile, readProjectFile } from './media-files.js';
+import { classificationGuidance } from './classification-guidance.js';
 
 const genres = ['casual', 'puzzle', 'action', 'strategy', 'simulation', 'adventure', 'idle', 'rhythm'];
 const limits = { manifestBytes: 65536, imageSourceBytes: 20 * 1024 * 1024, imageBytes: 2 * 1024 * 1024,
@@ -89,8 +90,8 @@ function platformItem(key, materials) {
 }
 
 const nextSteps = {
-  genre: '根据代码、规则和实玩证据选择一个最主要的玩法分类；保留已有作者选择。不凭项目名或框架猜分类。',
-  tags: '根据主角、画风、核心玩法和操作方式拟定主语言标签；保留作者已有标签，避免重复分类。不确定的术语先核实，不能只凭升级系统就认定 Roguelike。',
+  genre: `根据代码、规则和实玩证据选择一个最主要的玩法分类，不凭项目名或框架猜分类。${classificationGuidance.zh}`,
+  tags: `根据主角、画风、核心玩法和操作方式拟定主语言标签，最多 5 个、每个不超过 12 字。不确定的术语先核实，不能只凭升级系统就认定 Roguelike。${classificationGuidance.zh}`,
   mainCover: '优先复用已有封面或项目授权美术；缺少时由宿主工具制作清楚可读的 16:9 主封面，建议 1600×900。多语言自动叠字另复用一张无字底图，不需要各语言截图。',
   screenshots: '优先复用真实截图；缺少时运行游戏，用宿主浏览器/computer use 截取 3–5 个不同实机状态，保持原比例。不得用生成图冒充游戏截图。',
   preview: '可选：优先复用已有真实玩法预览；否则由宿主录制或沿用已验证的捕获脚本，建议 12–18 秒、MP4/WebM/GIF/动态 WebP。可以剪辑真实片段，不捏造玩法或奖励，不强制接管时钟、改玩法或动玩家存档。',

@@ -12,6 +12,7 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { Platform } from '../src/platform.js';
 import { recordPublishJob } from '../src/publish-progress.js';
 import { prepareGameUpdate } from '../src/game-updates.js';
+import { updateApprovalGuidance, updateHistoryGuidance } from '../src/update-approval-guidance.js';
 
 const tokenA = 'a'.repeat(64), tokenB = 'b'.repeat(64);
 const gameId = '11111111-1111-4111-8111-111111111111';
@@ -71,7 +72,8 @@ async function fixture(t, handler, { connected = true } = {}) {
 test('new workflow tools and opt-in prompts are discoverable through the actual MCP connection', async t => {
   const f = await fixture(t, () => { throw new Error('Discovery must not call the platform'); });
   const tools = (await f.client.listTools()).tools;
-  for (const name of ['prepare_game', 'get_game_integrations', 'configure_cloud_saves', 'configure_leaderboard', 'wait_for_publish', 'get_publisher_info', 'get_game_materials', 'get_game_announcement', 'publish_game_announcement', 'complete_game_update', 'set_game_media']) assert.ok(tools.some(tool => tool.name === name), name);
+  for (const name of ['prepare_game', 'get_game_integrations', 'configure_cloud_saves', 'configure_leaderboard', 'wait_for_publish', 'get_publisher_info', 'get_game_materials', 'get_game_announcement', 'publish_game_announcement', 'complete_game_update', 'get_game_updates', 'delete_game_update', 'set_game_media']) assert.ok(tools.some(tool => tool.name === name), name);
+  for (const name of ['complete_game_update', 'delete_game_update']) assert.ok(tools.find(tool => tool.name === name).inputSchema.required.includes('approved'), `${name} requires author approval`);
   const cloud = tools.find(tool => tool.name === 'configure_cloud_saves');
   assert.deepEqual([...cloud.inputSchema.required].sort(), ['enabled', 'gameSlug', 'schemaVersion']);
   const wait = tools.find(tool => tool.name === 'wait_for_publish');
@@ -177,6 +179,8 @@ test('prepare_game aggregates preparation once, remembers only explicit choices,
   const args = { project_directory: game, output_directory: 'dist' };
   const initial = await f.client.callTool({ name: 'prepare_game', arguments: args }); assert.equal(initial.isError, false);
   const data = parsed(initial);
+  assert.ok(data.instructions.includes(updateApprovalGuidance.zh));
+  assert.ok(data.instructions.includes(updateHistoryGuidance.zh));
   assert.equal(data.gameSlug, 'owned-game'); assert.equal(data.channel, 'local'); assert.equal(data.inspection.ready, true);
   assert.equal(data.materials.error, undefined); assert.equal(data.materials.original.locale, 'zh');
   assert.equal(data.languageCheck.multilingual, false); assert.equal(data.integrations.cloudSaves.enabled, false);
@@ -269,7 +273,7 @@ test('link and Docker deployments carry their prepared update group and complete
         return { body: { id: buildId, state: 'ready', path: '/games/owned-game' } };
       }
       assert.equal(request.url, `/api/developer/game-updates/${updateId}/complete`);
-      assert.deepEqual(request.body, { title: 'Combined release', notes: 'All selected features verified.' });
+      assert.deepEqual(request.body, { title: 'Combined release', notes: 'All selected features verified.', approved: true });
       const created = !completed; completed = true;
       return { body: { updateId, gameSlug: 'owned-game', status: 'published', created, version: '1.0.0', post: { id: boardId, url: `https://www.ai-made.games/community/p/${boardId}` } } };
     });
@@ -278,12 +282,45 @@ test('link and Docker deployments carry their prepared update group and complete
     const args = { project_directory: game, title: 'Owned game', release: { ...release, updateId }, ...(channel === 'external' ? { url: 'https://play.example/game' } : { project: 'owned-game', upload_id: otherBoard }) };
     const response = await f.client.callTool({ name: channel === 'external' ? 'publish_link' : 'publish_docker_game', arguments: args });
     assert.equal(response.isError, false); assert.equal(parsed(response).updateId, updateId);
-    const finish = { project_directory: game, update_id: updateId, title: 'Combined release', notes: 'All selected features verified.' };
+    const content = { project_directory: game, update_id: updateId, title: 'Combined release', notes: 'All selected features verified.' };
+    const before = f.requests.length;
+    for (const extra of [{}, { approved: false }, { approved: 'true' }]) assert.equal((await f.client.callTool({ name: 'complete_game_update', arguments: { ...content, ...extra } })).isError, true);
+    assert.equal(f.requests.length, before, 'No completion HTTP request without explicit author approval');
+    const finish = { ...content, approved: true };
     assert.equal(parsed(await f.client.callTool({ name: 'complete_game_update', arguments: finish })).created, true);
     assert.equal(parsed(await f.client.callTool({ name: 'complete_game_update', arguments: finish })).created, false);
     assert.equal(f.requests.filter(request => request.url === '/api/publish').length, 1, 'Completion retries cannot deploy another version');
     assert.notEqual((await prepareGameUpdate(f.platform, game, { gameSlug: 'owned-game' })).id, updateId);
   });
+});
+
+test('author update listing and deletion tools use exact selected references through stdio', async t => {
+  const reference = `build:${buildId}`, date = '2026-10-22T12:30:00.000Z';
+  const cursor = Buffer.from(JSON.stringify({ at: date, reference })).toString('base64url');
+  const record = { reference, version: '1.0.0', title: 'Duplicate update', notes: 'Verified fixes.', createdAt: date };
+  let removed = false;
+  const f = await fixture(t, request => {
+    if (request.method === 'GET') {
+      assert.ok(request.url === '/api/developer/game-updates?gameSlug=owned-game' || request.url === `/api/developer/game-updates?gameSlug=owned-game&cursor=${cursor}`);
+      return { body: { gameSlug: 'owned-game', updates: removed ? [] : [record], nextCursor: request.url.includes('cursor=') ? null : cursor } };
+    }
+    assert.equal(request.url, '/api/developer/game-updates'); assert.equal(request.method, 'DELETE');
+    assert.deepEqual(request.body, { gameSlug: 'owned-game', reference, approved: true });
+    const alreadyDeleted = removed; removed = true;
+    return { body: { gameSlug: 'owned-game', reference, deleted: true, alreadyDeleted } };
+  });
+  const first = parsed(await f.client.callTool({ name: 'get_game_updates', arguments: { gameSlug: 'owned-game' } }));
+  assert.deepEqual(first.updates, [record]); assert.equal(first.nextCursor, cursor);
+  const next = parsed(await f.client.callTool({ name: 'get_game_updates', arguments: { gameSlug: 'owned-game', cursor: first.nextCursor } }));
+  assert.equal(next.nextCursor, null);
+  const before = f.requests.length;
+  for (const extra of [{}, { approved: false }, { approved: 'true' }]) assert.equal((await f.client.callTool({ name: 'delete_game_update', arguments: { gameSlug: 'owned-game', reference, ...extra } })).isError, true);
+  assert.equal(f.requests.length, before, 'Missing or false approval cannot remove anything');
+  const args = { gameSlug: 'owned-game', reference, approved: true };
+  assert.equal(parsed(await f.client.callTool({ name: 'delete_game_update', arguments: args })).alreadyDeleted, false);
+  assert.equal(parsed(await f.client.callTool({ name: 'delete_game_update', arguments: args })).alreadyDeleted, true);
+  assert.ok(f.requests.every(request => request.authorization === `Bearer ${tokenA}`));
+  assert.equal(f.requests.some(request => request.url === '/api/publish'), false, 'Record removal cannot redeploy or roll back a game');
 });
 
 test('runtime version and materials/announcement contracts are exposed through the running MCP', async t => {

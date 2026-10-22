@@ -4,6 +4,7 @@ import { mkdtemp,writeFile,rm,mkdir,open } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { sourceSnapshot,compareSources,prepareRelease } from '../src/releases.js';
+import { updateApprovalGuidance, updateHistoryGuidance } from '../src/update-approval-guidance.js';
 test('release comparison detects content changes and removals without exporting source or secrets',async t=>{
  const dir=await mkdtemp(join(tmpdir(),'release-'));t.after(()=>rm(dir,{recursive:true,force:true}));
  await writeFile(join(dir,'game.js'),'old');await writeFile(join(dir,'.env'),'secret');await mkdir(join(dir,'dist'));await writeFile(join(dir,'dist/index.html'),'output');
@@ -13,6 +14,9 @@ test('release comparison detects content changes and removals without exporting 
  assert.equal(compareSources({},after.sourceFiles).baselineAvailable,false);
  const prepared=await prepareRelease({request:async()=>({previous:{source_manifest:before.sourceFiles},suggested:{patch:'1.0.1'}})},dir);
  assert.equal(prepared.previous.source_manifest,undefined);assert.deepEqual(prepared.comparison.changed,['game.js']);
+ assert.ok(prepared.instructions.includes(updateApprovalGuidance.en));
+ assert.ok(prepared.instructions.includes(updateHistoryGuidance.en));
+ assert.doesNotMatch(prepared.instructions,/exposes them only after success/);
 });
 
 test('release comparison excludes the top-level promotion kit before size checks but keeps nested game assets',async t=>{

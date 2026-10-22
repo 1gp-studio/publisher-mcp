@@ -17,6 +17,17 @@ test('automatic material filling uses the non-overwriting endpoint and always fo
   assert.deepEqual(calls, [['/api/developer/game-materials/demo', { method: 'PATCH', body: { titles: { ja: '猫' }, fillMissing: true } }]]);
 });
 
+test('mixed genre labels reach the platform intact through the fill-only endpoint', async () => {
+  const calls = [];
+  const response = { ok: true, filled: { tags: true }, skipped: { genre: true } };
+  const result = await fillGameMaterials({ request: async (...args) => { calls.push(args); return response; } },
+    'action-rpg', { genre: 'action', tags: ['放置', 'RPG'], fillMissing: false });
+  assert.equal(result, response);
+  assert.deepEqual(calls, [['/api/developer/game-materials/action-rpg', {
+    method: 'PATCH', body: { genre: 'action', tags: ['放置', 'RPG'], fillMissing: true },
+  }]]);
+});
+
 test('material tools reject unsafe slugs and fail closed for incomplete responses', async () => {
   let calls = 0;
   const platform = { request: async () => { calls++; return {}; } };

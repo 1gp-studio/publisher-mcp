@@ -125,6 +125,25 @@ test('existing author values and a disabled preview take precedence over local c
   assert.match(result.items.preview.nextStep, /只有明确要求才重新开启/);
 });
 
+test('mixed-genre tags remain valid candidates while a saved primary category keeps precedence', async t => {
+  const f = await fixture(t), materials = emptyMaterials();
+  await f.manifest({ genre: 'action', tags: ['放置', 'RPG'], tagsEn: ['Idle', 'RPG'] });
+  const newGame = await preparePromotion(f.root);
+  assert.deepEqual(newGame.localKit.issues, []);
+  assert.equal(newGame.items.genre.candidate, 'action');
+  assert.deepEqual(newGame.items.tags.candidate, ['放置', 'RPG']);
+  assert.match(newGame.items.tags.nextStep, /只避开与当前主分类重复/);
+  assert.match(newGame.items.genre.nextStep, /不因为简单易上手就归休闲/);
+
+  materials.labels = { genre: 'idle', genreSource: 'creator', tags: ['RPG'] };
+  const saved = await preparePromotion(f.root, existing(materials));
+  assert.equal(saved.items.genre.state, 'existing');
+  assert.equal(saved.items.genre.platform.value, 'idle');
+  assert.deepEqual(saved.items.tags.platform.value, ['RPG']);
+  assert.match(saved.items.genre.nextStep, /未经作者要求不替换/);
+  assert.ok(!saved.missing.includes('genre') && !saved.missing.includes('tags'));
+});
+
 test('remote read errors and missing old-server fields remain unknown even with a complete kit', async t => {
   const f = await fixture(t);
   await f.file('cover.png'); await f.file('shot.jpg'); await f.file('preview.webm');

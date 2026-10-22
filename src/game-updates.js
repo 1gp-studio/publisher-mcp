@@ -132,12 +132,13 @@ export async function publishGameUpdate(platform, { projectDirectory, gameSlug, 
     catch { return storageError(); }
   }
   const result = await submit(client);
-  return { ...result, updateId, nextUpdateStep: '完成所有选定功能、必要修复和最终网页检查后，调用一次 complete_game_update；中间部署不发社区日志。' };
+  return { ...result, updateId, nextUpdateStep: '完成所有选定功能、必要修复和最终网页检查后，把最终版本标题和说明给作者确认；只有作者明确批准相同内容后才调用 complete_game_update(approved=true)。部署授权不等于更新公告授权；中间部署不发社区日志。' };
 }
 
 /** Finalize once; losing the response or deleting the post must never cause another deployment. */
-export async function completeGameUpdate(platform, projectDirectory, { updateId, title, notes }) {
+export async function completeGameUpdate(platform, projectDirectory, { updateId, title, notes, approved }) {
   if (!uuid(updateId) || typeof title !== 'string' || !title.trim() || title.trim().length > 120 || typeof notes !== 'string' || !notes.trim() || notes.trim().length > 4000) return failure('INVALID_UPDATE', '需要真实 update_id 和最终合并的标题、说明。');
+  if (approved !== true) return failure('APPROVAL_REQUIRED', '请先把这份最终版本标题和说明给作者确认；明确批准相同内容后才发布更新公告。部署授权不等于公告授权。', { draft: { title: title.trim(), notes: notes.trim() } });
   const token = await platform.token?.();
   if (!token) return failure('AUTH_REQUIRED', '请先连接 1GP 账号。');
   let store, value;
@@ -147,7 +148,7 @@ export async function completeGameUpdate(platform, projectDirectory, { updateId,
   if (value && value.id !== updateId) return failure('UPDATE_MISMATCH', '本项目当前记录属于另一个更新，请核对 update_id。');
   if (await currentToken(platform) !== token) return changed();
   let data;
-  try { data = await platform.request(`/api/developer/game-updates/${updateId}/complete`, { method: 'POST', token, body: { title: title.trim(), notes: notes.trim() } }); }
+  try { data = await platform.request(`/api/developer/game-updates/${updateId}/complete`, { method: 'POST', token, body: { title: title.trim(), notes: notes.trim(), approved: true } }); }
   catch { return failure('UPDATE_STATUS_UNKNOWN', '收尾结果不明；仅用相同 update_id、title 和 notes 重试 complete_game_update，不要重发游戏。', { updateId }); }
   if (data?.error) return data;
   const validPost = data?.post && uuid(data.post.id) && typeof data.post.url === 'string' && (() => { try {
@@ -163,4 +164,57 @@ export async function completeGameUpdate(platform, projectDirectory, { updateId,
     await locked(store.file, async () => { const current = await read(store); if (current?.id === updateId) { await safeDirectory(store.directory); await unlink(store.file); } });
   } catch { return { ...data, warning: '更新已收尾，但本地记录未清除；下次需核对旧组已完成后再开始新任务。' }; }
   return data;
+}
+
+const record = value => value !== null && typeof value === 'object' && !Array.isArray(value);
+const referencePattern = /^(update|build|publication|devlog):[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/;
+const validReference = value => typeof value === 'string' && referencePattern.test(value);
+const timestamp = value => typeof value === 'string' && value.length <= 64 && /^\d{4}-\d{2}-\d{2}T/.test(value) && Number.isFinite(Date.parse(value));
+function validCursor(value) {
+  if (typeof value !== 'string' || value.length > 1000 || !/^[A-Za-z0-9_-]+$/.test(value)) return false;
+  try {
+    const bytes = Buffer.from(value, 'base64url');
+    if (bytes.toString('base64url') !== value) return false;
+    const cursor = JSON.parse(bytes.toString('utf8'));
+    return record(cursor) && Object.keys(cursor).length === 2 && timestamp(cursor.at) && validReference(cursor.reference);
+  } catch { return false; }
+}
+const updateHistoryError = () => failure('PLATFORM_ERROR', '平台返回的更新记录不完整，请重新读取；不要猜测记录编号或重复发布游戏。');
+const historyAccountChanged = () => failure('ACCOUNT_CHANGED', '连接账号已变更，请回到原账号重新读取更新记录；不会向新账号重放删除。');
+
+/** Read only the owned game's public release records; build/deployment details stay private. */
+export async function getGameUpdates(platform, gameSlug, { cursor } = {}) {
+  if (!slug(gameSlug) || cursor !== undefined && !validCursor(cursor)) return failure('INVALID_REQUEST', '请提供有效游戏标识，以及上次查询返回的原始 nextCursor。');
+  const token = await platform.token?.();
+  if (!token) return failure('AUTH_REQUIRED', '请先连接 1GP 账号。');
+  if (await currentToken(platform) !== token) return historyAccountChanged();
+  const params = new URLSearchParams({ gameSlug, ...(cursor === undefined ? {} : { cursor }) });
+  let data;
+  try { data = await platform.request(`/api/developer/game-updates?${params}`, { method: 'GET', token }); }
+  catch { return failure('UPDATE_STATUS_UNKNOWN', '无法读取更新记录，请重试同一查询；不要猜测编号或重新发布游戏。'); }
+  if (await currentToken(platform) !== token) return historyAccountChanged();
+  if (data?.error) return data;
+  if (!record(data) || data.gameSlug !== gameSlug || !Array.isArray(data.updates) || data.updates.length > 200
+    || data.nextCursor !== null && !validCursor(data.nextCursor)
+    || data.updates.some(item => !record(item) || !validReference(item.reference)
+      || item.version !== null && (typeof item.version !== 'string' || item.version.length > 40)
+      || typeof item.title !== 'string' || typeof item.notes !== 'string' || !timestamp(item.createdAt))
+    || new Set(data.updates.map(item => item.reference)).size !== data.updates.length) return updateHistoryError();
+  return { gameSlug, updates: data.updates.map(({ reference, version, title, notes, createdAt }) => ({ reference, version, title, notes, createdAt })), nextCursor: data.nextCursor };
+}
+
+/** Remove only an author-selected public update. Never deletes a build, game or deployment. */
+export async function deleteGameUpdate(platform, gameSlug, { reference, approved } = {}) {
+  if (approved !== true) return failure('APPROVAL_REQUIRED', '只删除作者明确指定的更新记录；已有相同删除指令可直接沿用。');
+  if (!slug(gameSlug) || !validReference(reference)) return failure('INVALID_REQUEST', '请使用 get_game_updates 返回的游戏和原始 reference，不要猜测编号。');
+  const token = await platform.token?.();
+  if (!token) return failure('AUTH_REQUIRED', '请先连接 1GP 账号。');
+  if (await currentToken(platform) !== token) return historyAccountChanged();
+  let data;
+  try { data = await platform.request('/api/developer/game-updates', { method: 'DELETE', token, body: { gameSlug, reference, approved: true } }); }
+  catch { return failure('UPDATE_STATUS_UNKNOWN', '删除结果不明；先查询同一游戏，必要时仅重试相同 reference，不删除其他记录。', { gameSlug, reference }); }
+  if (data?.error) return data;
+  if (!record(data) || data.gameSlug !== gameSlug || data.reference !== reference || data.deleted !== true || typeof data.alreadyDeleted !== 'boolean') return updateHistoryError();
+  const result = { gameSlug, reference, deleted: true, alreadyDeleted: data.alreadyDeleted };
+  return await currentToken(platform) !== token ? { ...result, warning: historyAccountChanged() } : result;
 }
