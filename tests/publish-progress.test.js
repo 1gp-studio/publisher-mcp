@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { mkdtemp, mkdir, readFile, writeFile, readdir, stat, rm, link } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { recordPublishJob, publishWithTracking, waitForPublish } from '../src/publish-progress.js';
+import { recordPublishJob, publishWithTracking, waitForPublish, withMaterialNextSteps } from '../src/publish-progress.js';
 import { testSymlink } from './helpers/symlink.js';
 
 const buildA = '11111111-1111-4111-8111-111111111111';
@@ -77,6 +77,8 @@ test('omitting buildId resumes the last job only for the same platform and conne
   const result = await waitForPublish(f.platform, {}, f.clock);
   assert.equal(result.resumed, true); assert.equal(result.pending, false); assert.equal(result.terminal, true);
   assert.equal(result.gameUrl, 'https://platform.example/games/actual-game'); assert.equal(result.release_version, '1.2.3');
+  assert.equal(result.workflowComplete, false); assert.equal(result.materialStatus, 'needs_verification');
+  assert.equal(result.gameSlug, 'actual-game'); assert.match(result.nextSteps.join('\n'), /get_game_materials\(\{gameSlug:"actual-game"\}\)/);
   assert.equal(f.calls[0].options.token, tokenA);
   assert.equal((await waitForPublish(f.platform, {}, f.clock)).state, 'ready', 'Terminal records remain recoverable after a lost tool response');
 });
@@ -99,6 +101,7 @@ test('failed is terminal, keeps the platform explanation, and never returns a ga
   const result = await waitForPublish(f.platform, { buildId: buildA }, f.clock);
   assert.equal(result.state, 'failed'); assert.equal(result.terminal, true); assert.equal(result.pending, false);
   assert.equal(result.message, 'Build exited with code 1'); assert.equal(result.gameUrl, undefined);
+  assert.equal(result.nextSteps, undefined); assert.equal(result.materialStatus, undefined);
   assert.equal(f.calls.length, 1); assert.equal(f.clock.now(), 0);
 });
 
@@ -200,14 +203,25 @@ test('tracked submissions preserve successful and failed responses, record only 
   f.setToken(tokenA);
   const ready = await publishWithTracking(f.platform, { channel: 'local', gameSlug: 'my-game' }, async () => ({ id: buildA, state: 'ready', path: '/games/my-game' }));
   assert.equal(ready.tracking.recorded, true); assert.equal(ready.gameUrl, 'https://platform.example/games/my-game');
+  assert.equal(ready.workflowComplete, false); assert.match(ready.nextSteps.join('\n'), /set_game_media/);
   const queued = await publishWithTracking(f.platform, { channel: 'local', gameSlug: 'my-game' }, async () => ({ id: buildA, state: 'queued', path: '/games/my-game' }));
   assert.equal(queued.state, 'queued'); assert.equal(queued.gameUrl, 'https://platform.example/games/my-game', 'the allocated page URL is retained for existing submission clients');
+  assert.equal(queued.nextSteps, undefined); assert.equal(queued.materialStatus, undefined);
   const failed = { code: 'NETWORK_ERROR', error: 'Unknown submission outcome' };
   assert.deepEqual(await publishWithTracking(f.platform, { channel: 'docker' }, async () => failed), failed);
   assert.equal(JSON.parse(await readFile(fileFor(f.platform), 'utf8')).buildId, buildA);
   const stale = await recordPublishJob(f.platform, { buildId: buildB }, tokenB);
   assert.equal(stale.code, 'ACCOUNT_CHANGED'); assert.equal(stale.recorded, false);
   assert.equal(JSON.parse(await readFile(fileFor(f.platform), 'utf8')).buildId, buildA);
+});
+
+test('ready follow-up covers kit metadata, reviewed media and verification without inventing a game or enabling features',()=>{
+  const ready=withMaterialNextSteps({state:'ready',path:'/games/new-game'});
+  assert.equal(ready.gameSlug,'new-game'); assert.equal(ready.workflowComplete,false);
+  for(const expected of ['1gp-kit/game.json','get_game_materials','set_game_details(fillMissing=true)','set_game_media','保留已有','作者关闭预览','同一 update_id','纯元数据或媒体补充无需再次部署','complete_game_update','未选择的可选功能不自动开启']) assert.ok(ready.nextSteps.join('\n').includes(expected),expected);
+  const unknown=withMaterialNextSteps({state:'ready',path:'/games/../other'});
+  assert.equal(unknown.gameSlug,undefined); assert.match(unknown.nextSteps.join('\n'),/不编造标识/);
+  for(const unchanged of [{state:'building'},{state:'failed'},{state:'ready',error:'Unverified'}]) assert.equal(withMaterialNextSteps(unchanged),unchanged);
 });
 
 test('invalid options, unknown states and mismatched response IDs never imply a successful publication', async t => {

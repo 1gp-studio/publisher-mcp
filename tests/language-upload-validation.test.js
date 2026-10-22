@@ -1,12 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { mkdtemp, mkdir, writeFile, rm, symlink, copyFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createServer } from 'node:http';
 import { Platform } from '../src/platform.js';
-import { uploadGameText } from '../src/languages.js';
+import { uploadGameText, gameTextStatus } from '../src/languages.js';
 import { validateGameText } from '../src/text-check.js';
 
 async function fixture(t, files = {}) {
@@ -24,7 +25,7 @@ function recorder(response = remote({ start: '开始' }), mutate = () => ({})) {
   return { calls, async request(path, options = {}) {
     const call = { path, method: options.method ?? 'GET', body: options.body };
     calls.push(call);
-    return call.method === 'PUT' ? await mutate(call, calls) : typeof response === 'function' ? await response(calls) : response;
+    return call.method === 'PUT' ? { status, files: { [call.body.locale]: { entries: call.body.entries } }, ...await mutate(call, calls) } : typeof response === 'function' ? await response(calls) : response;
   } };
 }
 const writes = platform => platform.calls.filter(call => call.method === 'PUT');
@@ -41,7 +42,7 @@ test('translations-only upload reads the real registered original and returns fi
     request.on('end', () => {
       calls.push({ method: request.method, path: request.url, body: body ? JSON.parse(body) : null });
       response.setHeader('Content-Type', 'application/json');
-      response.end(JSON.stringify(request.method === 'GET' ? snapshot : { titleSync: { filled: ['ja'], conflicts: [] } }));
+      response.end(JSON.stringify(request.method === 'GET' ? snapshot : { status, files: { ja: { entries: { start: '開始 {0}' } } }, titleSync: { filled: ['ja'], conflicts: [] } }));
     });
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
@@ -55,7 +56,7 @@ test('translations-only upload reads the real registered original and returns fi
   assert.equal(result.platformTranslation, 'claude');
   assert.deepEqual(result.gameNames.filled, ['ja']);
   assert.deepEqual(calls.map(call => call.method), ['GET', 'PUT', 'GET']);
-  assert.deepEqual(calls[1], { method: 'PUT', path: '/api/developer/language-files/my-game', body: { locale: 'ja', entries: { start: '開始 {0}' }, kind: 'translation', by: 'ai_creator' } });
+  assert.deepEqual(calls[1], { method: 'PUT', path: '/api/developer/language-files/my-game', body: { locale: 'ja', entries: { start: '開始 {0}' }, kind: 'translation', by: 'ai_creator', expectedOriginal: { locale: 'zh', hash: createHash('sha256').update(JSON.stringify([['start', '开始 {0}']])).digest('hex') } } });
 });
 
 test('translations-only upload checks placeholders, line breaks, separators and local width limits before any write', async t => {
@@ -238,4 +239,41 @@ test('translations-only upload retains the same bundled-font advice as standalon
   assert.equal(uploaded.ok, true);
   assert.deepEqual(uploaded.fonts, checked.fonts);
   if (existsSync(font)) assert.equal(uploaded.fonts.gaps[0].locale, 'ko');
+});
+
+test('original fingerprint is fixed to validated text even when the original changes before a later translation', async t => {
+  const directory = await fixture(t, { 'zh.json': { start: '开始' }, 'ja.json': { start: '開始' }, 'ko.json': { start: '시작' } });
+  const platform = recorder(remote({ start: '已修改' }), call => call.body.locale === 'ko'
+    ? { error: 'Original changed', code: 'ORIGINAL_CHANGED' } : {});
+  const result = await uploadGameText(platform, directory, 'my-game', original, [translation, { locale: 'ko', path: 'ko.json' }], { force: true });
+  assert.equal(result.code, 'ORIGINAL_CHANGED');
+  assert.deepEqual(result.uploaded, ['zh', 'ja']);
+  assert.equal(result.failed, 'ko');
+  assert.deepEqual(writes(platform)[1].body.expectedOriginal, { locale: 'zh', hash: createHash('sha256').update(JSON.stringify([['start', '开始']])).digest('hex') });
+  assert.deepEqual(writes(platform)[2].body.expectedOriginal, writes(platform)[1].body.expectedOriginal);
+});
+
+test('language batch stops if the connected account changes and never moves remaining writes to it', async t => {
+  const directory = await fixture(t, { 'zh.json': { start: '开始' }, 'ja.json': { start: '開始' } });
+  let token = 'a'.repeat(64);
+  const calls = [];
+  const platform = { token: async () => token, request: async (path, options) => {
+    calls.push(options); token = 'b'.repeat(64); return { status, files: { zh: { entries: { start: '开始' } } } };
+  } };
+  const result = await uploadGameText(platform, directory, 'my-game', original, [translation]);
+  assert.equal(result.code, 'ACCOUNT_CHANGED');
+  assert.deepEqual(result.uploaded, ['zh']);
+  assert.equal(calls.length, 1); assert.equal(calls[0].token, 'a'.repeat(64));
+});
+
+test('empty and malformed upload acknowledgements and status replies cannot report completion', async t => {
+  const directory = await fixture(t, { 'zh.json': { start: '开始' } });
+  for (const response of [{}, null, [], { status: 'ready' }, { status: [null] }]) {
+    const platform = { request: async () => response };
+    assert.equal((await gameTextStatus(platform, 'my-game')).code, 'PLATFORM_ERROR');
+    const upload = await uploadGameText(platform, directory, 'my-game', original);
+    assert.equal(upload.code, 'PLATFORM_ERROR'); assert.deepEqual(upload.uploaded, []);
+  }
+  const error = { code: 'AUTH_REQUIRED', error: 'Reconnect' };
+  assert.deepEqual(await gameTextStatus({ request: async () => error }, 'my-game'), error);
 });

@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { prepareGame } from '../src/prepare-game.js';
 import { testSymlink } from './helpers/symlink.js';
 
-const choices = { multilingual: null, cloudSaves: null, leaderboards: null };
+const choices = { multilingual: null, cloudSaves: null, leaderboards: null, announcement: null };
 const disabled = { cloudSaves: { enabled: false, schemaVersion: 1 }, leaderboards: [] };
 const board = { id: '12345678-1234-4123-8123-123456789abc', key: 'score', enabled: true };
 async function fixture(t) {
@@ -24,6 +24,10 @@ async function fixture(t) {
       calls.push({ path, options });
       if (path === '/api/developer/games/match') return state.matchError ?? { matches: state.matches };
       if (path.startsWith('/api/publish/releases/context?')) return state.context;
+      if (path === '/api/developer/game-materials/test-game') {
+        if (state.materialsNetworkError) throw new Error('Private upstream details must not leak');
+        return state.materials ?? { game: { id: 'game', slug: 'test-game' }, original: { locale: 'zh' }, languages: [], covers: {} };
+      }
       if (path === '/api/developer/game-integrations/test-game') {
         if (state.networkError) throw new Error('Network unavailable');
         return state.integrations;
@@ -36,15 +40,18 @@ async function fixture(t) {
 
 test('preparation finds the game once and includes channel, inspection, language and integration checks', async t => {
   const f = await fixture(t), result = await prepareGame(f.platform, f.project);
-  assert.deepEqual(f.calls.map(call => call.path), ['/api/developer/games/match', '/api/publish/releases/context?slug=test-game', '/api/developer/game-integrations/test-game']);
+  assert.deepEqual(f.calls.map(call => call.path), ['/api/developer/games/match', '/api/publish/releases/context?slug=test-game', '/api/developer/game-integrations/test-game', '/api/developer/game-materials/test-game']);
   assert.equal(result.channel, 'local');
   assert.equal(result.inspection.ready, true);
   assert.equal(result.languageCheck.multilingual, false);
   assert.deepEqual(result.integrations, disabled);
+  assert.equal(result.materials.error, undefined); assert.equal(result.materials.original.locale, 'zh');
+  assert.equal(result.promotion.independentOfMultilingual, true);
+  assert.deepEqual(result.promotion.unknown, ['genre', 'tags', 'mainCover', 'screenshots', 'preview']);
   assert.deepEqual(result.features, choices);
   assert.deepEqual(result.decisions, ['multilingual', 'cloudSaves', 'leaderboards']);
   assert.ok(!JSON.stringify(result).includes(f.state.token));
-  assert.deepEqual(await readdir(f.directory), []);
+  assert.deepEqual(await readdir(f.directory), ['game-updates']);
 });
 
 test('existing capabilities are retained without asking to enable them or writing remote settings', async t => {
@@ -54,12 +61,12 @@ test('existing capabilities are retained without asking to enable them or writin
   await writeFile(join(f.project, 'locales/zh.json'), '{"start":"开始"}');
   f.state.integrations = { cloudSaves: { enabled: true, schemaVersion: 7 }, leaderboards: [board] };
   const result = await prepareGame(f.platform, f.project);
-  assert.deepEqual(result.features, { multilingual: true, cloudSaves: true, leaderboards: true });
+  assert.deepEqual(result.features, { multilingual: true, cloudSaves: true, leaderboards: true, announcement: null });
   assert.deepEqual(result.decisions, []);
   assert.equal(result.integrations.cloudSaves.schemaVersion, 7);
   assert.deepEqual(result.integrations.leaderboards, [board]);
   assert.ok(f.calls.filter(call => call.path.includes('game-integrations')).every(call => !call.options?.body && !call.options?.method));
-  assert.deepEqual(await readdir(f.directory), []);
+  assert.deepEqual(await readdir(f.directory), ['game-updates']);
 });
 
 test('explicit false is remembered as intent and never disables live capabilities', async t => {
@@ -68,7 +75,7 @@ test('explicit false is remembered as intent and never disables live capabilitie
   const selected = { multilingual: false, cloudSaves: false, leaderboards: false };
   const first = await prepareGame(f.platform, f.project, { features: selected });
   const next = await prepareGame(f.platform, f.project);
-  assert.deepEqual(first.features, selected); assert.deepEqual(next.features, selected);
+  assert.deepEqual(first.features, { ...selected, announcement: null }); assert.deepEqual(next.features, { ...selected, announcement: null });
   assert.deepEqual(next.integrations, f.state.integrations);
   assert.deepEqual(next.decisions, []);
   assert.deepEqual(JSON.parse(await readFile(await f.file(), 'utf8')), selected);
@@ -88,7 +95,7 @@ test('saved choices are scoped to account, platform and canonical project direct
   await writeFile(join(second, 'index.html'), '<!doctype html><title>Other game</title>');
   assert.deepEqual((await prepareGame(f.platform, second)).features, choices);
   assert.equal((await prepareGame(f.platform, join(f.project, '.'))).features.cloudSaves, true);
-  assert.equal((await readdir(f.directory)).length, 1);
+  assert.equal((await readdir(f.directory)).length, 2);
 });
 
 test('combined preparation respects an explicit language decision in nested instructions too', async t => {
@@ -97,6 +104,8 @@ test('combined preparation respects an explicit language decision in nested inst
     await prepareGame(f.platform, f.project, { features: { multilingual } });
     const next = await prepareGame(f.platform, f.project);
     assert.equal(next.features.multilingual, multilingual);
+    assert.equal(next.promotion.independentOfMultilingual, true);
+    assert.ok(next.promotion.items.mainCover);
     assert.doesNotMatch(next.languageCheck.nextSteps.join('\n'), /先问用户|要不要做成多语言/);
     if (!multilingual) assert.match(next.languageCheck.nextSteps[0], /保留游戏当前语言和已有功能/);
     else assert.match(next.languageCheck.nextSteps[0], /作者已选择接入多语言/);
@@ -170,7 +179,10 @@ test('ambiguous, unauthorized and new projects never fetch a fabricated game con
   assert.equal(f.calls.length, 1);
   f.calls.length = 0; delete f.state.matchError; f.state.matches = []; f.state.context = { source: null, previous: null };
   const fresh = await prepareGame(f.platform, f.project);
-  assert.equal(fresh.channel, 'new'); assert.equal(fresh.integrations, null);
+  assert.equal(fresh.channel, 'new'); assert.equal(fresh.integrations, null); assert.equal(fresh.materials, null);
+  assert.equal(fresh.promotion.snapshot, 'new_game');
+  assert.deepEqual(fresh.promotion.missing, ['genre', 'tags', 'mainCover', 'screenshots', 'preview']);
+  assert.ok(fresh.decisions.includes('announcement'));
   assert.equal(f.calls.length, 2); assert.match(f.calls[1].path, /\?projectId=[a-f0-9]{32}$/);
 });
 
@@ -192,7 +204,7 @@ test('missing account storage cannot erase an explicit choice or persist it unsc
 });
 
 test('an account switch during remote preparation pins reads and never stores A choices for B', async t => {
-  for (const switchAt of ['match', 'context', 'game-integrations']) await t.test(switchAt, async t => {
+  for (const switchAt of ['match', 'context', 'game-integrations', 'game-materials']) await t.test(switchAt, async t => {
     const f = await fixture(t), tokenA = f.state.token, tokenB = 'b'.repeat(64);
     const fileA = await f.file();
     f.state.token = tokenB;
@@ -240,4 +252,23 @@ test('compatibility clients without token storage keep remote auth errors and lo
   const result = await prepareGame(f.platform, f.project, { features: { cloudSaves: false } });
   assert.equal(result.features.cloudSaves, false); assert.ok(result.preferenceWarning);
   assert.deepEqual(await readdir(f.directory), []);
+});
+
+test('announcement intent is optional and remembered without posting; updates do not prompt for it', async t => {
+  const f = await fixture(t);
+  assert.ok(!(await prepareGame(f.platform, f.project)).decisions.includes('announcement'));
+  const result = await prepareGame(f.platform, f.project, { features: { announcement: true } });
+  assert.equal(result.features.announcement, true);
+  assert.equal((await prepareGame(f.platform, f.project)).features.announcement, true);
+  assert.ok(f.calls.every(call => !call.path.includes('game-announcement')));
+  f.state.materials = { code: 'READ_FAILED', error: 'Materials unavailable' };
+  const failed = await prepareGame(f.platform, f.project);
+  assert.deepEqual(failed.materials, f.state.materials);
+  assert.deepEqual(failed.promotion.missing, []);
+  assert.deepEqual(failed.promotion.unknown, ['genre', 'tags', 'mainCover', 'screenshots', 'preview']);
+  f.state.materialsNetworkError = true;
+  const unavailable = await prepareGame(f.platform, f.project);
+  assert.equal(unavailable.materials.code, 'MATERIALS_UNAVAILABLE');
+  assert.deepEqual(unavailable.promotion.unknown, ['genre', 'tags', 'mainCover', 'screenshots', 'preview']);
+  assert.doesNotMatch(JSON.stringify(unavailable), /Private upstream details/);
 });

@@ -14,6 +14,23 @@ const validJob = value => value && typeof value === 'object' && uuid(value.build
   && (value.gameSlug === undefined || slug(value.gameSlug))
   && (value.channel === undefined || typeof value.channel === 'string' && /^[a-z][a-z0-9-]{0,31}$/.test(value.channel));
 
+/** A ready deployment is a handoff to material verification, never proof that the whole task is done. */
+export function withMaterialNextSteps(data, fallbackSlug) {
+  if (!data || typeof data !== 'object' || Array.isArray(data) || data.error || data.state !== 'ready') return data;
+  const pathSlug = typeof data.path === 'string' ? /^\/games\/([a-z0-9]+(?:-[a-z0-9]+)*)$/.exec(data.path)?.[1] : undefined;
+  const gameSlug = [data.games?.slug, data.slug, data.gameSlug, pathSlug, fallbackSlug].find(slug);
+  return { ...data, ...(gameSlug ? { gameSlug } : {}), workflowComplete: false, materialStatus: 'needs_verification', nextSteps: [
+    'ready 只确认部署完成。继续完成本次发布物料；核对仍使用本次发布的作者账号，账号变化时先回到原账号。',
+    gameSlug ? `调用 get_game_materials({gameSlug:${JSON.stringify(gameSlug)}})，复用 prepare_game.promotion 和本地 1gp-kit/game.json 中已准备的物料；需要重查 prepare_game 时沿用同一 update_id，不另建更新组。`
+      : '先通过发布状态或 find_my_game 核实真实 gameSlug，不编造标识；取得后读取 get_game_materials，复用 prepare_game.promotion 和本地 1gp-kit/game.json，重查时沿用同一 update_id。',
+    '根据实际玩法用 set_game_details(fillMissing=true) 补缺的分类和作者主语言标签；沿用已有授权与选择，保留已有作者文案、分类和标签。',
+    '用 set_game_media 上传已检查的主封面、实机截图和可选预览；从本地 kit 复用真实文件，缺少时由宿主 AI 截图、录制或准备合适素材，不编造游戏画面。保留已有封面、截图和作者关闭预览的选择。',
+    '若作者已选择多语言，继续补缺的文案和同一无字底图上的本地化游戏名封面；保留作者选择，未选择的可选功能不自动开启。',
+    '重新读取 get_game_materials，并实际查看公开封面和截图、播放预览、检查网页和必要接口；部分失败或缺项要明确报告，不能把部署 ready 当作全部完成。',
+    '纯元数据或媒体补充无需再次部署。最终网页、功能和物料核对后，用同一 update_id 调用 complete_game_update 收尾一次；首发宣传仅按作者已批准的相同内容发布。',
+  ] };
+}
+
 // Every path component is checked, including ancestors of the configured credential directory.
 // Never follow a pre-existing symlink/junction or read another file through a hard link.
 async function directory(path, create = false) {
@@ -107,6 +124,7 @@ export async function publishWithTracking(platform, { channel, gameSlug }, submi
   if (!token) return authFailure();
   const client = Object.create(platform);
   client.token = async () => token;
+  client.currentToken = () => platform.token();
   client.request = (path, options = {}) => platform.request(path, { ...options, token });
   const data = await submit(client);
   if (!data?.error && typeof data?.id === 'string' && ['queued', 'building', 'ready', 'failed'].includes(data.state)) {
@@ -114,9 +132,9 @@ export async function publishWithTracking(platform, { channel, gameSlug }, submi
       .catch(() => ({ recorded: false, buildId: data.id, message: '发布已提交；本机未能保存恢复记录，请保留此 build ID。' }));
     // Preserve the submission API's allocated game-page address. The accompanying state is
     // still authoritative; waitForPublish deliberately exposes a URL only once it is ready.
-    return { ...data, tracking, ...(data.path ? { gameUrl: platform.origin + data.path } : {}) };
+    return withMaterialNextSteps({ ...data, tracking, ...(data.path ? { gameUrl: platform.origin + data.path } : {}) }, gameSlug);
   }
-  return data;
+  return withMaterialNextSteps(data, gameSlug);
 }
 
 const runtime = {
@@ -184,8 +202,8 @@ export async function waitForPublish(platform, { buildId, waitSeconds = 45, poll
     latest = status;
     if (status.state === 'ready' || status.state === 'failed') {
       const gameSlug = slug(status.games?.slug) ? status.games.slug : job.gameSlug;
-      return { ...status, ...base, pending: false, terminal: true,
-        ...(status.state === 'ready' && gameSlug ? { gameUrl: `${platform.origin}/games/${gameSlug}` } : {}) };
+      return withMaterialNextSteps({ ...status, ...base, pending: false, terminal: true,
+        ...(status.state === 'ready' && gameSlug ? { gameUrl: `${platform.origin}/games/${gameSlug}` } : {}) }, gameSlug);
     }
     if (waitSeconds === 0) return pending({});
     const pause = Math.min(pollIntervalSeconds * 1000, deadline - clock.now());

@@ -1,12 +1,14 @@
 # 1GP Publisher MCP
 
-在 Codex、Claude Code 等支持 MCP 的客户端里检查并发布当前游戏到 https://1gp-game-platform.vercel.app 。每个用户使用自己的平台账号，一次浏览器授权后即可发布。网页与受支持的服务端函数均由 1GP 统一托管，不需要用户登录 Vercel、提供 Vercel/Supabase Token、选择个人团队或新建个人云项目。
+在 Codex、Claude Code 等支持 MCP 的客户端里检查并发布当前游戏到 AIWANNA（https://www.ai-made.games，新域名 aiwanna.games 上线后自动沿用）。每个用户使用自己的平台账号，一次浏览器授权后即可发布。网页与受支持的服务端函数均由 1GP 统一托管，不需要用户登录 Vercel、提供 Vercel/Supabase Token、选择个人团队或新建个人云项目。
 
 ## 安装
 
 需要 Node.js 24+、npm（首次从 GitHub 安装 MCP 时需要 Git）。游戏本身不需要 Git 仓库。这是标准的 stdio MCP 服务，任何 MCP 客户端都能使用。
 
-**只装一次，装在用户级。** 一份安装对你所有的游戏项目都有效，不要在每个游戏项目里各装一份，也不要在游戏目录里新建 `.mcp.json`。已经装过的，只把配置里的版本号改成新版本即可。
+**只装一次，装在用户级。** 一份安装对你所有的游戏项目都有效，不要在每个游戏项目里各装一份，也不要在游戏目录里新建 `.mcp.json`。固定版本不会自行升级：先读取实际 MCP 握手 `serverInfo.version`，或调用 `get_publisher_info`；本流程需要 **0.9.0 或更高兼容版本**。低版本只更新当前客户端已有 1GP 配置里的固定版本，保留其他参数、环境配置和授权凭证；更高兼容版本不降级。
+
+更新后重新加载 MCP，再核对实际运行版本和工具；客户端无法重载时才请用户重启。配置已经写成新版、工具名称已经存在，都不能证明旧进程已经升级。读不到版本时说明情况，不假定已经完成。
 
 如果某个游戏项目的 `.mcp.json` 里还有以前装的 `onegp`（项目级的会盖过用户级，版本停在旧的），请把那一项删掉，以免两个版本打架。
 
@@ -17,7 +19,7 @@
 ```toml
 [mcp_servers.onegp]
 command = "npx"
-args = ["--yes", "github:1gp-studio/publisher-mcp#v0.8.0"]
+args = ["--yes", "github:1gp-studio/publisher-mcp#v0.9.0"]
 startup_timeout_sec = 60
 tool_timeout_sec = 600
 ```
@@ -31,10 +33,10 @@ tool_timeout_sec = 600
 在终端运行一次（`--scope user` 对你本人的所有项目生效）：
 
 ```sh
-claude mcp add onegp --scope user -- npx --yes github:1gp-studio/publisher-mcp#v0.8.0
+claude mcp add onegp --scope user -- npx --yes github:1gp-studio/publisher-mcp#v0.9.0
 ```
 
-已经装过要升级时，先 `claude mcp remove onegp --scope user`，再运行上面这行。用 `claude mcp list` 可以看到当前装的是哪一份。
+已经装过时，用 `claude mcp list` 确认当前生效的配置，只更新其中固定的包版本；保留既有参数和环境配置，不删除 1GP 的授权凭证。上面的命令用于首次安装，不需要每次发布都重新添加。
 
 重新打开 Claude Code。首次 npx 下载较慢，可用 `MCP_TIMEOUT=60000 claude` 启动以放宽启动超时。
 
@@ -47,7 +49,7 @@ claude mcp add onegp --scope user -- npx --yes github:1gp-studio/publisher-mcp#v
 1. 告诉 AI（Codex / Claude Code）：**连接 1GP 发布平台**。调用 `connect_platform` 后，用户本人打开返回的授权链接，登录并点击允许。对照页面与工具的客户端指纹。
 2. 打开游戏项目，告诉 AI：**检查当前游戏，支持的话发布到 1GP，把试玩链接给我。**
 3. MCP 自动读取名字和介绍（Vite 项目读 package.json，Godot 项目读 project.godot）以及要上传的文件；未提供介绍时使用中性的默认介绍，不推断玩法。
-4. `prepare_game` 一次返回项目识别、原发布渠道、版本差异、构建检查、语言和已有可选功能。按需构建后发布，复用结果，不重复逐项检查。
+4. `prepare_game` 一次返回项目识别、原发布渠道、版本差异、构建检查、语言、已有可选功能、页面物料 `materials` 和常规物料清单 `promotion`。AI 阅读代码并试玩，补缺的分类、作者主语言标签、主封面、实机截图和短预览；即使不接多语言也检查这些项目。多语言、云存档、排行榜各自可选；首发社区宣传另记为 `features.announcement`。集中解决尚未明确的选项，复用已有授权和检查结果。
 5. 异步发布返回构建 ID 后调用 `wait_for_publish`。每次最多等 45 秒；pending 时继续同一任务，省略 build_id 可恢复当前账号最近任务。只有 ready 表示部署成功，仍需验证实际游戏。
 
 ## 版本号与更新说明（v0.5.0）
@@ -55,7 +57,7 @@ claude mcp add onegp --scope user -- npx --yes github:1gp-studio/publisher-mcp#v
 推荐每次发布前调用 `prepare_game(project_directory, gameSlug?, docker_project?)`，其中已包含 `prepare_release` 的结果，沿用游戏标识。只有单独查看版本差异时才需要 `prepare_release`。工具将本地文件哈希与上次成功发布比较，返回新增、修改、删除的路径和版本建议。本地 AI 必须阅读相关代码，有 Git 历史时结合上次 sourceCommit 的 diff，按玩法、关卡、修复、平衡、界面和资源等主要方面精简概括。文件名不能证明具体玩法变化，没有基线时明确说明，不能编造差异。
 
 - 首发 `1.0.0`；大规模玩法重做或存档不兼容升主版本；新玩法/关卡升次版本；修复、平衡或纯资源变化升补丁版本。
-- 作者可以修改建议。所有发布工具需要 `release`，格式示例：`{"version":"1.1.0","title":"新关卡","notes":"关卡：新增森林挑战。修复：解决结算卡住。","changeType":"minor"}`。实际内容必须来自当前项目，`changeType` 为 `major`、`minor`、`patch` 或 `assets`。
+- 作者可以修改建议。所有发布工具需要 `release.updateId`，沿用 `prepare_game` 返回的真实 `updateId`；`release` 格式示例：`{"updateId":"从 prepare_game 返回的 UUID","version":"1.1.0","title":"新关卡","notes":"关卡：新增森林挑战。修复：解决结算卡住。","changeType":"minor"}`。实际内容必须来自当前项目，`changeType` 为 `major`、`minor`、`patch` 或 `assets`。
 - Docker 发布传入 `project_directory` 才能保存下一次比较的源码清单。只上传路径与 SHA-256 哈希，不上传源码正文；跳过隐藏文件、依赖、常见输出和凭证，比较上限为 1,000 文件、64 MiB。
 - 成功后更新日志才对玩家展示；失败记录留在作者历史中。作者可在历史页修改版本和说明，回退可用的旧 Vercel 部署或 Docker 镜像。回退不恢复玩家存档或外部数据；产物被云服务删除后不可恢复。外部链接不支持回退。
 - 升级后重启客户端，重新加载工具。下方参数示例用于检查；调用发布时须另加 `release`。
@@ -155,9 +157,12 @@ Godot 也使用同一个 `gameSlug` 参数，不需要 `output_directory`。平�
 
 ## 工具
 
+当前提供 30 个工具；Docker 构建、上传、查询和发布工具见后文。
+
 | 工具 | 用途 |
 | --- | --- |
-| prepare_game(project_directory, gameSlug?, docker_project?, features?) | 统一准备：识别游戏、沿用渠道、版本差异、构建/语言检查和可选功能；记住作者明确选择，不自动启用 |
+| prepare_game(project_directory, gameSlug?, docker_project?, features?, update_id?, new_update?) | 统一准备：识别游戏、沿用渠道、版本差异、构建/语言检查和可选功能；记住作者明确选择，不自动启用 |
+| complete_game_update(project_directory, update_id, title, notes) | 最终 ready 并完成网页与功能验证后，把同一更新的所有部署合并为一条开发日志；首发或私有游戏不发更新帖，失败只重试收尾 |
 | get_game_integrations(gameSlug, feature?, boardId?) | 读取自己游戏的云存档/榜单配置，可获取带真实 ID 与玩家平台 origin 的专属接入说明 |
 | configure_cloud_saves(gameSlug, enabled, schemaVersion) | 作者选择后设置云存档，返回专属说明；不读取玩家存档、不修改游戏代码 |
 | configure_leaderboard(gameSlug, configuration) | 创建或更新榜单；创建使用稳定 key 幂等重试，更新保留既有成绩与计分规则 |
@@ -167,26 +172,53 @@ Godot 也使用同一个 `gameSlug` 参数，不需要 `output_directory`。平�
 | inspect_game(project_directory, deployment_target?, vercel_output_directory?, output_directory?, build_script?) | 只读检测当前绝对路径，返回支持情况及构建方式（vercel-output / web-static / godot-web） |
 | connect_platform() | 建立当前客户端连接，返回用户授权网址 |
 | publish_game(project_directory, title?, description?, deployment_target?, vercel_output_directory?, output_directory?, build_script?, gameSlug?) | 检测后发布；可指定原游戏标识，在转移所有权或移动文件夹后继续更新同一游戏 |
-| publish_link(url, project_directory?, title?, description?) | 把已部署的可玩 HTTPS 网址发布为 1GP 游戏页，不构建；同一网址再次提交会更新同一作品 |
+| publish_link(url, project_directory, title?, description?) | 把已部署的可玩 HTTPS 网址发布为 1GP 游戏页，不构建；同一网址再次提交会更新同一作品 |
 | get_publish_status(build_id) | 查询当前账号自己的构建和试玩网址 |
 | find_my_game(project_directory, gameSlug?) | 按当前项目找到你自己的游戏；给了编号就核对它是不是这个项目的 |
 | validate_game_text(project_directory, original, translations, separators?) | 上传前检查译文：键名、占位符、换行、分隔符、长度和字体 |
 | set_game_covers(project_directory, gameSlug, base?, special?, modes?, position?) | 各语言封面：底图、专用封面、每种语言的选择和游戏名位置 |
-| update_github_game(project_directory, gameSlug, release?) | 更新从 GitHub 发布的游戏：确认这是游戏的仓库、改动已提交并推送到发布分支，再让平台从最新提交重新构建；不会替你推送 |
+| set_game_media(project_directory, gameSlug, cover?, screenshots?, preview?, fillMissing?) | 上传已准备好的主封面、实机截图和预览；只补缺主封面/预览，截图追加并按内容去重，保留现有物料 |
+| update_github_game(project_directory, gameSlug, release) | 更新从 GitHub 发布的游戏：确认这是游戏的仓库、改动已提交并推送到发布分支，再让平台从最新提交重新构建；不会替你推送 |
 | check_game_languages(project_directory) | 只读检查游戏有没有做多语言（语言文件、`?lang=`、浏览器语言、1GP SDK），返回检测到的语言、下一步和接入约定 |
 | upload_game_text(project_directory, gameSlug, original?, translations?) | 上传游戏自己的原始语言文件和你的 AI 翻好的各语言文件（`{"键名": "文字"}`），平台在 `/i18n/<游戏>/<语言>.json` 提供给玩家 |
 | get_game_text_status(gameSlug) | 每种语言：已翻译、缺哪些键、哪些键的原文改过要重翻 |
-| set_game_details(gameSlug, titles?, descriptions?, languages?) | 设置各语言游戏名和简介（作者自己的，平台不覆盖；留空交回平台翻译）；没用平台语言文件、自带多语言的游戏也可告知支持哪些语言 |
+| set_game_details(gameSlug, titles?, descriptions?, languages?, genre?, tags?, fillMissing?) | 游戏名、简介和支持的语言；fillMissing:true 还可补缺分类和作者主语言标签，保留已有内容 |
+
+v0.9.0 还提供 `get_publisher_info`（实际运行版本和能力）、`get_game_materials`（页面物料与封面预览）、`get_game_announcement`（首发宣传资格和草稿）、`publish_game_announcement`（发布已批准的首发帖子）。`set_game_details` 与 `set_game_covers` 的 `fillMissing:true` 用于只补缺失文案或未设置的封面模式，保留已有内容和作者选择。
+
+### 常规上架物料
+
+`prepare_game.promotion` 分别列出分类、标签、主封面、截图和预览，不受多语言选项影响。先复用作者已有物料及项目根目录 `1gp-kit/game.json` 的安全候选；读取失败标为未知，不当作空内容覆盖。候选文件或已上传链接不等于质量已验证，AI 仍需查看图片、播放预览。分类按真实代码和试玩判断，从 casual、puzzle、action、strategy、simulation、adventure、idle、rhythm 中选一个；标签使用作者主语言，最多 5 个、每个最多 12 字，不能重复分类或虚构功能。
+
+MCP **负责检查、上传和保存，不内置浏览器截图、录屏或图像生成**。宿主 AI 用自己的可用工具补齐缺失素材：标题在小尺寸仍清晰的 16:9 主封面、建议 3–5 张不同实机截图、优先 12–18 秒的真实玩法预览。先复用现有素材；不改玩法、不接管游戏时钟、不碰玩家存档，不用生成图片冒充实机。缺工具或作者明确跳过时逐项报告，不把部署成功等同于物料齐全。多语言无字底图和文字叠加另由 `set_game_covers` 处理。
+
+取得真实游戏 ID 后，用 `set_game_details({gameSlug,genre,tags,fillMissing:true})` 和 `set_game_media({project_directory,gameSlug,cover,screenshots,preview,fillMissing:true})` 上传实际准备好的内容。媒体路径相对项目；整批安全读取并验证后才开始写入。图片源文件最多 20 MiB、2500 万像素，MCP 转为不超过 2 MiB 的 WebP；预览支持 GIF/WebP/MP4/WebM，最多 20 MiB，不在服务器转码。截图只追加，重复内容不重复添加；主封面和预览只补缺，已有内容及作者关闭预览的选择保留。修改现有内容仍使用作者编辑页。
+
+媒体失败返回已保存、跳过和失败的逐项结果；结果不明先检查当前物料，再沿用相同内容重试，不盲目换文件重传。上传后查看保存的公开图片并验证视频可播放。`1gp-kit` 不进入游戏运行包；纯元数据或媒体修改无需部署或发布新日志。
 
 需要指定静态输出时返回 `OUTPUT_REQUIRED`，需要完整服务端产物时返回 `VERCEL_OUTPUT_REQUIRED`。错误包含 `LOCAL_BUILD_FAILED`、`UNSUPPORTED_BUILD`、`POTENTIAL_SECRET`、`AUTH_REQUIRED`，`publish_link` 另有 `INVALID_URL`、`TITLE_REQUIRED`；连不上平台时为 `NETWORK_ERROR`。遇到网络不确定的发布结果不要自动重复提交，可到网站「我的发布」查看。
 
 ## 授权与限制
 
-本地凭证保存在 `~/.config/1gp-studio/`，目录权限 0700，文件权限 0600。平台仅保存 SHA-256 哈希。凭证不会通过工具结果或浏览器 URL 输出。授权 90 天有效，可发布和管理自己游戏的构建、页面信息、翻译、封面及云存档/排行榜设置，不能读取玩家存档或代玩家提交成绩；在网站「我的发布」撤销后，再运行 connect_platform 可重新连接。
+本地凭证保存在 `~/.config/1gp-studio/`，目录权限 0700，文件权限 0600。平台仅保存 SHA-256 哈希。凭证不会通过工具结果或浏览器 URL 输出。授权 90 天有效，可发布和管理自己游戏的构建、页面信息、翻译、封面及云存档/排行榜设置，并通过专用工具发布作者明确批准的首发宣传，不能读取玩家存档或代玩家提交成绩；在网站「我的发布」撤销后，再运行 connect_platform 可重新连接。
 
 平台目前限制全站同时 2 个构建、每个账号最多 50 个作品，不设每日次数限制。账号邮箱验证由 Supabase 负责；平台管理员必须配置生产邮件服务，才能支持组织外用户收取登录邮件。1GP 托管团队的 Vercel 套餐及运行限制仍适用；不占用用户个人 Vercel 账号。GitHub 来源继续遵守仓库授权与构建限制。
 
 开发时可使用 `ONEGP_PLATFORM_URL` 指向另一 HTTPS 平台，或本机 HTTP localhost/127.0.0.1；凭证按平台分别保存。测试运行 `npm test`，包括真实 MCP stdio 客户端集成测试。
+
+## v0.9.0：版本核对、完整上架物料、可选首发宣传与合并更新
+
+- 每次工作先核对实际运行版本，旧版配置升级后重载并复查。HTTP 401 统一返回 `AUTH_REQUIRED`，权限不足和其他失败不会误报成功或要求反复登录。
+- `prepare_game.materials` / `get_game_materials` 展示现有游戏名称、简介、封面与相关翻译状态。选多语言后，AI 对五个目标语言检查游戏文字和页面物料，以作者原始语言为准；`set_game_details(fillMissing=true)` 只补缺文案，保留已有内容。
+- 常规发布新增 `prepare_game.promotion` 五项清单和 `set_game_media` 上传能力；分类和标签不再依赖多语言选项，主封面、实机截图与预览由宿主 AI 准备后直接上传，不要求作者回网页逐个导入。填缺和幂等记录在服务端事务内保护，重复上传不增加截图，删除后的同一请求不复活内容。
+- 自动封面使用**同一张无字底图加各语言游戏名字**，不是生成不同语言的游戏截图。复用底图，对非原始语言中未设置的模式用 `set_game_covers(fillMissing=true)` 补 `gen`，保留原始语言主封面、已有 main/special 模式和文字位置。实际查看预览；缺底图/名称而回退主封面的情况仍是未完成。标签、制作说明、版本说明由平台翻译；未完成时如实列出。
+- 封面先整批验证并读取固定快照，再上传；阻止链接逃逸、硬链接、读取期间文件替换或超限。多步操作固定同一账号，失败会保留已完成项目。
+- AI 译文上传带预检原文的语言及哈希，数据库原子检查；原文改变返回 `ORIGINAL_CHANGED`，必须重读并更新译文，不能把旧翻译标成最新。
+- 一次逻辑更新沿用一个 `updateId`。`prepare_game` 仅在本地按账号、平台、项目保存 UUID，首次实际发布才幂等注册服务器更新组；所有渠道的发布都传 `release.updateId`，包括首发取得真实游戏 ID 所需的中间部署、可选功能接入和验证修复。尽量把改动一起做完再发布；仅修改平台文字、翻译或封面，无须新部署。
+- 最终部署 ready 且网页、接口与所选功能验证后，只调用一次 `complete_game_update`，用最终合并说明生成一条开发日志。首发组不发更新帖，私有游戏不向社区发帖。收尾结果不明只重试相同 ID 和内容，不重发游戏；同内容完成重试幂等，已删帖子不复活。成功后清除本地活动组。已注册而未完成的旧组必须显式 `update_id` 恢复；确认是独立新任务才 `new_update=true`，不能把下一次更新悄悄混进旧组。
+- `features.announcement` 只记录首发社区宣传意向。`get_game_announcement` 提供资格、`launchReference` 和草稿；AI 与其他发布物料一起展示标题和正文，只有作者明确批准相同内容后才提交 `approved:true`。最终发布 ready 且网页检查通过后，`publish_game_announcement` 发出帖子。重试沿用同一引用并返回原帖，删帖后不自动重发，更新版本不自动发首发宣传帖；发帖失败也不重新发布游戏。
+
+此版本需要配套平台接口和数据库迁移：按序执行 202610220001_mcp_translation_snapshot.sql、202610220002_game_announcements.sql、202610220003_materials_snapshot.sql、202610220004_game_language_owner_writes.sql、202610220005_game_update_sessions.sql、202610220006_publishing_materials.sql（需已有语言文件、短语翻译与社区基础迁移）。它们提供原文指纹检查、首发去重标记、自动物料并发保护、写入时所有权校验、按逻辑更新合并开发日志和媒体上传幂等回执；游戏转交后旧作者的在途写入也会被拒绝。先完成平台验证与部署，再发布 MCP tag；本地版本号更新不代表公开版本已发布。
 
 ## v0.8.0：统一准备与按需接入
 
@@ -238,7 +270,7 @@ Godot 也使用同一个 `gameSlug` 参数，不需要 `output_directory`。平�
 让游戏里的文字跟着玩家在 1GP 网站选的语言走：
 
 1. 发布前 `check_game_languages`。已有多语言：确认打开时先读 `?lang=`；还没有：先问用户要不要做成多语言，同意才改。
-2. 按约定改造（提示词 `make_game_multilingual`）：玩家看到的文字换成键名，写一份原始语言 JSON，接入 SDK 的 `AIMadeGames.i18n`，中日韩准备字体并保留已有其他语言字体，按钮给长文字留余量。
+2. 按约定改造（提示词 `make_game_multilingual`）：玩家看到的文字换成键名，写一份原始语言 JSON，接入 SDK 的 `AIWanna.i18n`，中日韩准备字体并保留已有其他语言字体，按钮给长文字留余量。
 3. 用你自己的 AI 按当前网站目标 `zh`、`en`、`ja`、`ko`、`es` 补齐缺失或过期的翻译，跳过原始语言；原文不在目标列表中时保留原文并补齐全部五个目标。键名一致、占位符原样保留，已有其他语言继续保留。
 4. 发布后 `upload_game_text` 上传改过的原始语言文件和本次补齐的翻译，`get_game_text_status` 核对，`set_game_details` 按需补齐五个目标语言的游戏名和简介（先给用户看）。
 

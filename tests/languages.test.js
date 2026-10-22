@@ -50,7 +50,8 @@ test('MCP stdio keeps all ten game languages usable with five default targets an
   let text='';req.on('data',chunk=>text+=chunk);req.on('end',()=>{
    calls.push({method:req.method,path:req.url,body:text?JSON.parse(text):undefined});
    res.setHeader('Content-Type','application/json');
-   res.end(JSON.stringify(req.method==='GET'?{engine:null,status}:{ok:true}));
+   const body=text?JSON.parse(text):null;
+   res.end(JSON.stringify(req.method==='GET'?{engine:null,status}:req.method==='PUT'?{status,files:{[body.locale]:{entries:body.entries}}}:{ok:true}));
   });
  });
  await new Promise(resolve=>http.listen(0,'127.0.0.1',resolve));t.after(()=>new Promise(resolve=>http.close(resolve)));
@@ -103,7 +104,7 @@ test('MCP stdio keeps all ten game languages usable with five default targets an
 test('game text upload sends the original first, then translations as the creator\'s AI, and stays inside the project',async t=>{
  const dir=await mkdtemp(join(tmpdir(),'upload-'));t.after(()=>rm(dir,{recursive:true,force:true}));
  await writeFile(join(dir,'zh.json'),'{"start":"开始"}');await writeFile(join(dir,'ja.json'),'{"start":"スタート"}');
- const calls=[];const platform={request:async(path,options={})=>{calls.push([path,options.method??'GET',options.body]);return options.method?{}:{engine:null,status:[]};}};
+ const calls=[];const platform={request:async(path,options={})=>{calls.push([path,options.method??'GET',options.body]);return options.method?{status:[],files:{[options.body.locale]:{entries:options.body.entries}}}:{engine:null,status:[]};}};
  const done=await uploadGameText(platform,dir,'my-game',{locale:'zh',path:'zh.json'},[{locale:'ja',path:'ja.json'}]);
  assert.deepEqual(done.uploaded,['zh','ja']);
  assert.deepEqual(calls.slice(0,2).map(([path,method,body])=>[path,method,body.kind,body.by]),[['/api/developer/language-files/my-game','PUT','original',undefined],['/api/developer/language-files/my-game','PUT','translation','ai_creator']]);

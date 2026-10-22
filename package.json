@@ -1,6 +1,6 @@
 {
   "name": "@1gp-studio/publisher-mcp",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "description": "Publish web games to 1GP Studio from MCP clients such as Codex and Claude Code",
   "type": "module",
   "bin": {
@@ -20,6 +20,8 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.32.1",
     "esbuild": "0.28.2",
+    "file-type": "22.1.1",
+    "sharp": "0.35.5",
     "zod": "^4.3.6"
   },
   "license": "MIT",

@@ -18,6 +18,26 @@ async function fixture(t,files) {
   return dir;
 }
 const release={version:'1.0.0',title:'First release',notes:'Initial playable game',changeType:'minor'};
+// Publishing tests exercise the real prepare_game -> register -> publish sequence over stdio.
+// Keep workflow traffic out of artifact assertions, which inspect only actual deployment bodies.
+function workflowResponse(req,res,input={}) {
+  const path=new URL(req.url,'http://test'),slug=path.searchParams.get('slug');
+  let body;
+  if(path.pathname==='/api/developer/games/match') body=input.slug?{game:{slug:input.slug,title:'Game'}}:{matches:[]};
+  else if(path.pathname==='/api/publish/releases/context') body={source:slug?'local':null,...(slug?{gameSlug:slug}:{}),previous:null};
+  else if(path.pathname==='/api/developer/game-updates') body={created:true,update:{id:input.updateId,gameSlug:input.gameSlug??null,state:'open'}};
+  else if(path.pathname.startsWith('/api/developer/game-materials/')) body={game:{id:'11111111-1111-4111-8111-111111111111',slug:path.pathname.split('/').at(-1)},original:{locale:'zh'},languages:[],covers:{}};
+  else if(path.pathname.startsWith('/api/developer/game-integrations/')) body={game:{id:'11111111-1111-4111-8111-111111111111',slug:path.pathname.split('/').at(-1)},platformOrigin:'https://www.ai-made.games',cloudSaves:{enabled:false,schemaVersion:1},leaderboards:[]};
+  else return false;
+  res.setHeader('Content-Type','application/json');res.end(JSON.stringify(body));return true;
+}
+async function preparedRelease(client,projectDirectory,options={}) {
+  const result=await client.callTool({name:'prepare_game',arguments:{project_directory:projectDirectory,...options}});
+  assert.equal(result.isError,false,result.content[0].text);
+  const prepared=JSON.parse(result.content[0].text);
+  assert.match(prepared.updateId,/^[a-f0-9-]{36}$/);
+  return {...release,updateId:prepared.updateId};
+}
 const web={'package.json':JSON.stringify({name:'test-game',description:'A game',scripts:{build:'vite build'},devDependencies:{vite:'7'}}),'package-lock.json':'{}','index.html':'<div>game</div>'};
 test('Godot and non-Vite projects return unsupported before executing anything',async t=>{
   const dir=await fixture(t,{'project.godot':'config_version=5',...web});
@@ -79,7 +99,7 @@ test('Godot metadata is read from project.godot as plain data',async t=>{
 });
 test('publish_link posts an external URL with the client token and returns the game page',async t=>{
   let seen,body;
-  const http=createServer((req,res)=>{seen=req.headers.authorization;let text='';req.on('data',c=>text+=c);req.on('end',()=>{body=JSON.parse(text);res.setHeader('Content-Type','application/json');res.end(JSON.stringify({slug:'game-abc',state:'ready',path:'/games/game-abc'}));});});
+  const http=createServer((req,res)=>{seen=req.headers.authorization;let text='';req.on('data',c=>text+=c);req.on('end',()=>{if(workflowResponse(req,res,text?JSON.parse(text):{}))return;body=JSON.parse(text);res.setHeader('Content-Type','application/json');res.end(JSON.stringify({slug:'game-abc',state:'ready',path:'/games/game-abc'}));});});
   await new Promise(resolve=>http.listen(0,'127.0.0.1',resolve));t.after(()=>new Promise(resolve=>http.close(resolve)));
   const origin=`http://127.0.0.1:${http.address().port}`,config=await fixture(t,{}),game=await fixture(t,{'project.godot':'config/name="dgame"\nconfig/description="Ink hero defense"\n'});
   // the server runs with HOME=config, so its credential lives in config/.config/1gp-studio
@@ -88,14 +108,17 @@ test('publish_link posts an external URL with the client token and returns the g
   const client=new Client({name:'1gp-link-test',version:'1.0.0'});
   const transport=new StdioClientTransport({command:process.execPath,args:[resolve('src/server.js')],env:{...process.env,ONEGP_PLATFORM_URL:origin,HOME:config,USERPROFILE:config},stderr:'pipe'});
   await client.connect(transport);t.after(()=>client.close());
-  const missing=await client.callTool({name:'publish_link',arguments:{url:'https://example.github.io/dgame/'}});
+  const release=await preparedRelease(client,game);
+  const missing=await client.callTool({name:'publish_link',arguments:{project_directory:game,url:'https://example.github.io/dgame/'}});
   assert.equal(JSON.parse(missing.content[0].text).code,'RELEASE_NOTES_REQUIRED');
-  const bad=await client.callTool({name:'publish_link',arguments:{release,url:'http://example.com/game/'}});
+  const bad=await client.callTool({name:'publish_link',arguments:{release,project_directory:game,url:'http://example.com/game/'}});
   assert.equal(bad.isError,true);assert.equal(JSON.parse(bad.content[0].text).code,'INVALID_URL');
   const result=await client.callTool({name:'publish_link',arguments:{release,url:'https://example.github.io/dgame/',project_directory:game}});
   const data=JSON.parse(result.content[0].text);
   assert.equal(seen,`Bearer ${token}`);assert.deepEqual(body,{source:'external',release,url:'https://example.github.io/dgame/',title:'dgame',description:'Ink hero defense'});
   assert.equal(data.gameUrl,`${origin}/games/game-abc`);
+  assert.equal(data.workflowComplete,false);assert.equal(data.gameSlug,'game-abc');assert.equal(data.materialStatus,'needs_verification');
+  assert.match(data.nextSteps.join('\n'),/1gp-kit\/game\.json/);assert.match(data.nextSteps.join('\n'),/set_game_media/);
 });
 async function godotFixture(t) {
   const {mkdir,utimes}=await import('node:fs/promises');
@@ -145,43 +168,54 @@ test('Godot projects without a web export explain how to export',async t=>{
 });
 test('publish_game sends a Godot export with the engine reference',async t=>{
   let body;
-  const http=createServer((req,res)=>{let text='';req.on('data',c=>text+=c);req.on('end',()=>{body=JSON.parse(text);res.setHeader('Content-Type','application/json');res.end(JSON.stringify({id:'00000000-0000-4000-8000-000000000000',slug:'g',state:'queued',path:'/games/g'}));});});
+  const http=createServer((req,res)=>{let text='';req.on('data',c=>text+=c);req.on('end',()=>{if(workflowResponse(req,res,text?JSON.parse(text):{}))return;body=JSON.parse(text);res.setHeader('Content-Type','application/json');res.end(JSON.stringify({id:'00000000-0000-4000-8000-000000000000',slug:'g',state:'queued',path:'/games/g'}));});});
   await new Promise(resolve=>http.listen(0,'127.0.0.1',resolve));t.after(()=>new Promise(resolve=>http.close(resolve)));
   const origin=`http://127.0.0.1:${http.address().port}`,config=await fixture(t,{}),game=await godotFixture(t);
   const platform=new Platform({origin,configDirectory:join(config,'.config','1gp-studio')});
   const {mkdir}=await import('node:fs/promises');await mkdir(platform.directory,{recursive:true,mode:0o700});await writeFile(platform.file,JSON.stringify({token:'b'.repeat(64)}),{mode:0o600});
   const client=new Client({name:'1gp-godot-test',version:'1.0.0'});
   await client.connect(new StdioClientTransport({command:process.execPath,args:[resolve('src/server.js')],env:{...process.env,ONEGP_PLATFORM_URL:origin,HOME:config,USERPROFILE:config},stderr:'pipe'}));t.after(()=>client.close());
+  const release=await preparedRelease(client,game);
   const result=await client.callTool({name:'publish_game',arguments:{release,project_directory:game}});
   assert.equal(result.isError,false);
   assert.equal(body.buildMethod,'godot-web');assert.equal(body.title,'dgame');assert.equal(body.files.some(f=>f.file.endsWith('.wasm')),false);
   assert.deepEqual(body.runtime,{file:'index.wasm',sha:createHash('sha1').update('engine wasm').digest('hex'),size:11});
   assert.equal(Object.hasOwn(body,'gameSlug'),false,'existing Godot publishing omits an update target');
   const previousProjectId=body.projectId;
-  const update=await client.callTool({name:'publish_game',arguments:{release,project_directory:game,gameSlug:'transferred-godot-game'}});
+  const updateRelease=await preparedRelease(client,game,{gameSlug:'transferred-godot-game',new_update:true});
+  const update=await client.callTool({name:'publish_game',arguments:{release:updateRelease,project_directory:game,gameSlug:'transferred-godot-game'}});
   assert.equal(update.isError,false);assert.equal(body.gameSlug,'transferred-godot-game');
   assert.equal(body.projectId,previousProjectId,'an explicit target does not rewrite the local project identity');
   assert.equal(body.buildMethod,'godot-web');assert.equal(body.runtime.file,'index.wasm');
 });
 test('actual MCP stdio transport exposes the tools and rejects unsupported projects',async t=>{
   const dir=await fixture(t,{'project.godot':'config_version=5'});
+  const http=createServer((req,res)=>{let text='';req.on('data',c=>text+=c);req.on('end',()=>{
+    if(workflowResponse(req,res,text?JSON.parse(text):{}))return;
+    assert.fail('Unsupported projects must not publish');
+  });});
+  await new Promise(resolve=>http.listen(0,'127.0.0.1',resolve));t.after(()=>new Promise(resolve=>http.close(resolve)));
+  const origin=`http://127.0.0.1:${http.address().port}`,config=await fixture(t,{});
+  const platform=new Platform({origin,configDirectory:join(config,'.config','1gp-studio')});
+  await mkdir(platform.directory,{recursive:true});await writeFile(platform.file,JSON.stringify({token:'c'.repeat(64)}),{mode:0o600});
   const client=new Client({name:'1gp-integration-test',version:'1.0.0'});
-  const transport=new StdioClientTransport({command:process.execPath,args:[resolve('src/server.js')],stderr:'pipe'});
+  const transport=new StdioClientTransport({command:process.execPath,args:[resolve('src/server.js')],env:{...process.env,ONEGP_PLATFORM_URL:origin,HOME:config,USERPROFILE:config},stderr:'pipe'});
   await client.connect(transport);t.after(()=>client.close());
-  assert.deepEqual((await client.listTools()).tools.map(t=>t.name).sort(),['build_docker_image','build_vercel_game','check_game_languages','configure_cloud_saves','configure_leaderboard','connect_platform','find_my_game','get_docker_upload_status','get_game_integrations','get_game_text_status','get_publish_status','inspect_game','prepare_game','prepare_release','publish_docker_game','publish_game','publish_link','set_game_covers','set_game_details','update_github_game','upload_docker_image','upload_game_text','validate_game_text','wait_for_publish']);
+  assert.deepEqual((await client.listTools()).tools.map(t=>t.name).sort(),['build_docker_image','build_vercel_game','check_game_languages','complete_game_update','configure_cloud_saves','configure_leaderboard','connect_platform','find_my_game','get_docker_upload_status','get_game_announcement','get_game_integrations','get_game_materials','get_game_text_status','get_publish_status','get_publisher_info','inspect_game','prepare_game','prepare_release','publish_docker_game','publish_game','publish_game_announcement','publish_link','set_game_covers','set_game_details','set_game_media','update_github_game','upload_docker_image','upload_game_text','validate_game_text','wait_for_publish']);
   assert.deepEqual((await client.listPrompts()).prompts.map(p=>p.name).sort(), ['add_cloud_saves','add_leaderboard','choose_publish_path','make_game_multilingual','prepare_docker_publish','prepare_github_publish','publish_local_artifacts','update_game']);
   const githubPrompt = await client.getPrompt({name:'prepare_github_publish',arguments:{repo:'https://github.com/org/game',kind:'tag',ref:'v2.0',check_result:'缺少 package-lock.json'}});
   const promptText = githubPrompt.messages[0].content.text;
   assert.match(promptText,/v2.0/); assert.match(promptText,/缺少 package-lock.json/); assert.match(promptText,/保持此渠道/);
   const localPrompt = await client.getPrompt({name:'publish_local_artifacts'});
   assert.match(localPrompt.messages[0].content.text,/不让我回网页手动选文件/);
+  const release=await preparedRelease(client,dir);
   const result=await client.callTool({name:'publish_game',arguments:{release,project_directory:dir}});
   assert.equal(result.isError,true);assert.equal(JSON.parse(result.content[0].text).code,'UNSUPPORTED_BUILD');
 });
 
 test('publish_game sends only local build output and never posts a failed build',async t=>{
   const bodies=[];
-  const http=createServer((req,res)=>{let text='';req.on('data',c=>text+=c);req.on('end',()=>{bodies.push(JSON.parse(text));res.setHeader('Content-Type','application/json');res.end(JSON.stringify({id:'00000000-0000-4000-8000-000000000000',path:'/games/static',state:'queued'}));});});
+  const http=createServer((req,res)=>{let text='';req.on('data',c=>text+=c);req.on('end',()=>{if(workflowResponse(req,res,text?JSON.parse(text):{}))return;bodies.push(JSON.parse(text));res.setHeader('Content-Type','application/json');res.end(JSON.stringify({id:'00000000-0000-4000-8000-000000000000',path:'/games/static',state:'queued'}));});});
   await new Promise(resolve=>http.listen(0,'127.0.0.1',resolve));t.after(()=>new Promise(resolve=>http.close(resolve)));
   const origin=`http://127.0.0.1:${http.address().port}`,config=await fixture(t,{});
   const game=await fixture(t,{...web,'private.ts':'PRIVATE_SOURCE_SENTINEL','build.cjs':`const fs=require('node:fs');const path=require('node:path');const out=process.argv[process.argv.indexOf('--outDir')+1];fs.writeFileSync(path.join(out,'index.html'),'built game');fs.writeFileSync(path.join(out,'game.js.map'),'PRIVATE_SOURCE_SENTINEL');`});
@@ -190,6 +224,7 @@ test('publish_game sends only local build output and never posts a failed build'
   await mkdir(platform.directory,{recursive:true,mode:0o700});await writeFile(platform.file,JSON.stringify({token:'b'.repeat(64)}),{mode:0o600});
   const client=new Client({name:'1gp-static-test',version:'1.0.0'});
   await client.connect(new StdioClientTransport({command:process.execPath,args:[resolve('src/server.js')],env:{...process.env,ONEGP_PLATFORM_URL:origin,HOME:config,USERPROFILE:config},stderr:'pipe'}));t.after(()=>client.close());
+  const release=await preparedRelease(client,game);
   const result=await client.callTool({name:'publish_game',arguments:{release,project_directory:game}});
   assert.equal(result.isError,false);
   assert.equal(bodies.length,1);assert.equal(bodies[0].buildMethod,'web-static');
@@ -211,6 +246,7 @@ test('publish_game sends only local build output and never posts a failed build'
 test('publish_game targets the same owned local game from different folders and never retries a rejected target',async t=>{
   const bodies=[];
   const http=createServer((req,res)=>{let text='';req.on('data',c=>text+=c);req.on('end',()=>{
+    if(workflowResponse(req,res,text?JSON.parse(text):{}))return;
     const body=JSON.parse(text);bodies.push(body);res.setHeader('Content-Type','application/json');
     if(body.gameSlug==='not-owned'){res.statusCode=403;res.end(JSON.stringify({code:'PUBLISH_FAILED',error:'只能更新自己拥有的本地游戏。'}));return;}
     const slug=body.gameSlug||'new-local-game';
@@ -228,10 +264,12 @@ test('publish_game targets the same owned local game from different folders and 
   assert.equal(publish.inputSchema.properties.gameSlug.type,'string');
   assert.equal(publish.inputSchema.required.includes('gameSlug'),false);
   assert.equal(Object.hasOwn(tools.find(tool=>tool.name==='publish_link').inputSchema.properties,'gameSlug'),false,'external links do not accept a local update target');
+  const release=await preparedRelease(client,original);
   const first=await client.callTool({name:'publish_game',arguments:{release,project_directory:original}});
   assert.equal(first.isError,false);assert.equal(Object.hasOwn(bodies[0],'gameSlug'),false);
   for(const folder of [original,moved]){
-    const updated=await client.callTool({name:'publish_game',arguments:{release,project_directory:folder,gameSlug:'original-game-a1b2c3d4'}});
+    const folderRelease=await preparedRelease(client,folder,{gameSlug:'original-game-a1b2c3d4',new_update:true});
+    const updated=await client.callTool({name:'publish_game',arguments:{release:folderRelease,project_directory:folder,gameSlug:'original-game-a1b2c3d4'}});
     assert.equal(updated.isError,false);
     assert.equal(JSON.parse(updated.content[0].text).gameUrl,`${origin}/games/original-game-a1b2c3d4`);
   }
@@ -244,7 +282,9 @@ test('publish_game targets the same owned local game from different folders and 
     assert.equal(rejected.isError,true,invalid);
   }
   assert.equal(bodies.length,3,'invalid targets are rejected before any upload');
-  const denied=await client.callTool({name:'publish_game',arguments:{release,project_directory:moved,gameSlug:'not-owned'}});
+  // Simulate ownership being revoked after a valid preparation/registration, at the publish endpoint.
+  const deniedRelease=await preparedRelease(client,moved,{gameSlug:'not-owned',new_update:true});
+  const denied=await client.callTool({name:'publish_game',arguments:{release:deniedRelease,project_directory:moved,gameSlug:'not-owned'}});
   assert.equal(denied.isError,true);assert.equal(JSON.parse(denied.content[0].text).code,'PUBLISH_FAILED');
   assert.equal(bodies.length,4,'a rejected target never falls back to publishing a new game');
   assert.equal(bodies[3].gameSlug,'not-owned');
@@ -317,17 +357,20 @@ test('Godot rejects export directories and ancestor links that leave the project
 
 test('Docker MCP publication requires a ready matching upload and sends no ECR credentials',async t=>{
   const bodies=[];let state='importing';
-  const http=createServer((req,res)=>{let text='';req.on('data',c=>text+=c);req.on('end',()=>{res.setHeader('Content-Type','application/json');if(req.url.startsWith('/api/publish/docker/uploads/'))res.end(JSON.stringify({state,project:'game'}));else{bodies.push(JSON.parse(text));res.end(JSON.stringify({id:'00000000-0000-4000-8000-000000000000',path:'/games/docker',state:'queued'}));}});});
+  const http=createServer((req,res)=>{let text='';req.on('data',c=>text+=c);req.on('end',()=>{if(workflowResponse(req,res,text?JSON.parse(text):{}))return;res.setHeader('Content-Type','application/json');if(req.url.startsWith('/api/publish/docker/uploads/'))res.end(JSON.stringify({state,project:'game'}));else{bodies.push(JSON.parse(text));res.end(JSON.stringify({id:'00000000-0000-4000-8000-000000000000',path:'/games/docker',state:'queued'}));}});});
   await new Promise(resolve=>http.listen(0,'127.0.0.1',resolve));t.after(()=>new Promise(resolve=>http.close(resolve)));
   const origin=`http://127.0.0.1:${http.address().port}`,config=await fixture(t,{});
   const platform=new Platform({origin,configDirectory:join(config,'.config','1gp-studio')});
   await mkdir(platform.directory,{recursive:true,mode:0o700});await writeFile(platform.file,JSON.stringify({token:'b'.repeat(64)}),{mode:0o600});
   const client=new Client({name:'1gp-docker-test',version:'1.0.0'});
   await client.connect(new StdioClientTransport({command:process.execPath,args:[resolve('src/server.js')],env:{...process.env,ONEGP_PLATFORM_URL:origin,HOME:config,USERPROFILE:config},stderr:'pipe'}));t.after(()=>client.close());
-  const args={upload_id:'11111111-1111-4111-8111-111111111111',project:'game',title:'Docker game'};
+  const game=await fixture(t,{'index.html':'Docker game'});
+  const release=await preparedRelease(client,game,{docker_project:'game'});
+  const args={project_directory:game,upload_id:'11111111-1111-4111-8111-111111111111',project:'game',title:'Docker game'};
   assert.equal((await client.callTool({name:'publish_docker_game',arguments:{...args,release}})).isError,true);assert.equal(bodies.length,0);
   state='ready';assert.equal((await client.callTool({name:'publish_docker_game',arguments:{...args,release,project:'other'}})).isError,true);assert.equal(bodies.length,0);
   const published=await client.callTool({name:'publish_docker_game',arguments:{...args,release}});assert.equal(published.isError,false);
-  assert.deepEqual(bodies,[{source:'docker',release,hosting:'ec2-docker',uploadId:args.upload_id,project:'game',title:'Docker game',description:''}]);
+  const {sourceFiles,...sentRelease}=bodies[0].release;assert.deepEqual(sentRelease,release);assert.deepEqual(Object.keys(sourceFiles),['index.html']);
+  assert.deepEqual(bodies,[{source:'docker',release:{...release,sourceFiles},hosting:'ec2-docker',uploadId:args.upload_id,project:'game',title:'Docker game',description:''}]);
   assert.equal(JSON.parse(published.content[0].text).gameUrl,origin+'/games/docker');
 });

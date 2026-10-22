@@ -180,26 +180,53 @@ test('upload failures and invalid receipts are never retried',async()=>{
   await assert.rejects(()=>uploadVercelFiles({request:async()=>{throw new Error('must not upload');}},[file],{release:{notes:'x'.repeat(4300*1024)}}),/4300 KiB.*没有上传任何文件/);
 });
 test('MCP publishes whole games with receipts, unchanged release/gameSlug and no cloud credentials',async t=>{
-  const calls=[];let rejectUpload=false;
+  const calls=[];let rejectUpload=false,registeredUpdate=null;
+  const gameId='11111111-1111-4111-8111-111111111111';
   const http=createServer((req,res)=>{let text='';req.on('data',chunk=>text+=chunk);req.on('end',()=>{
-    const body=JSON.parse(text);calls.push({path:req.url,body,authorization:req.headers.authorization});res.setHeader('Content-Type','application/json');
-    if(req.url==='/api/publish/vercel/files')res.end(JSON.stringify(rejectUpload?{code:'NETWORK_ERROR',error:'uncertain'}:{files:body.files.map(receipt)}));
-    else res.end(JSON.stringify({id:'00000000-0000-4000-8000-000000000000',path:'/games/original',state:'queued'}));
+    const body=text?JSON.parse(text):null,path=new URL(req.url,'http://test').pathname;
+    calls.push({path,body,authorization:req.headers.authorization});res.setHeader('Content-Type','application/json');
+    if(path==='/api/developer/games/match')res.end(JSON.stringify({game:{id:gameId,slug:'original',title:'Full game'}}));
+    else if(path==='/api/publish/releases/context')res.end(JSON.stringify({gameSlug:'original',source:'local',previous:null}));
+    else if(path==='/api/developer/game-integrations/original')res.end(JSON.stringify({game:{id:gameId,slug:'original'},cloudSaves:{enabled:false},leaderboards:[]}));
+    else if(path==='/api/developer/game-materials/original')res.end(JSON.stringify({game:{id:gameId,slug:'original'},original:{locale:'en'},languages:[],covers:{}}));
+    else if(path==='/api/developer/game-updates'){
+      const created=registeredUpdate===null;
+      if(registeredUpdate!==null&&registeredUpdate!==body.updateId){res.statusCode=409;res.end(JSON.stringify({code:'UPDATE_GAME_MISMATCH',error:'Unexpected new update'}));return;}
+      registeredUpdate=body.updateId;
+      res.end(JSON.stringify({created,update:{id:registeredUpdate,gameSlug:body.gameSlug,state:'open'}}));
+    }
+    else if(path==='/api/publish/vercel/files')res.end(JSON.stringify(rejectUpload?{code:'NETWORK_ERROR',error:'uncertain'}:{files:body.files.map(receipt)}));
+    else if(path==='/api/publish')res.end(JSON.stringify({id:'00000000-0000-4000-8000-000000000000',path:'/games/original',state:'queued'}));
+    else {res.statusCode=404;res.end(JSON.stringify({error:`Unexpected endpoint ${path}`}));}
   });});
   await new Promise(resolve=>http.listen(0,'127.0.0.1',resolve));t.after(()=>new Promise(resolve=>http.close(resolve)));
   const origin=`http://127.0.0.1:${http.address().port}`,config=await fixture(t,{}),root=await fixture(t);
   for(let index=0;index<205;index++)await writeFile(join(root,prefix+`static/asset-${index}.txt`),'asset');
   const platform=new Platform({origin,configDirectory:join(config,'.config/1gp-studio')});await mkdir(platform.directory,{recursive:true});await writeFile(platform.file,JSON.stringify({token:'a'.repeat(64)}));
   const client=new Client({name:'complete-test',version:'1'});await client.connect(new StdioClientTransport({command:process.execPath,args:[resolve('src/server.js')],env:{...process.env,ONEGP_PLATFORM_URL:origin,HOME:config,USERPROFILE:config},stderr:'pipe'}));t.after(()=>client.close());
-  const release={version:'1.0.0',title:'First game',notes:'Initial playable game',changeType:'minor'};
+  const preparation=await client.callTool({name:'prepare_game',arguments:{project_directory:root,deployment_target:'vercel',gameSlug:'original'}});
+  assert.equal(preparation.isError,false,JSON.stringify(preparation));
+  const prepared=JSON.parse(preparation.content[0].text);
+  assert.equal(prepared.gameSlug,'original');assert.equal(prepared.channel,'local');assert.equal(prepared.inspection.ready,true);
+  assert.match(prepared.updateId,/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i);assert.equal(prepared.update.id,prepared.updateId);
+  assert.deepEqual(new Set(calls.map(call=>call.path)),new Set(['/api/developer/games/match','/api/publish/releases/context','/api/developer/game-integrations/original','/api/developer/game-materials/original']));
+  assert.equal(calls.length,4);assert.equal(registeredUpdate,null,'preparation must not register or publish');
+  assert.ok(calls.every(call=>call.authorization==='Bearer '+'a'.repeat(64)));calls.length=0;
+  const release={updateId:prepared.updateId,version:'1.0.0',title:'First game',notes:'Initial playable game',changeType:'minor'};
   const args={project_directory:root,deployment_target:'vercel',gameSlug:'original',release};
   const published=await client.callTool({name:'publish_game',arguments:args});assert.equal(published.isError,false,JSON.stringify(published));
-  assert.equal(calls.length,3);assert.equal(calls[0].body.files.length,200);assert.equal(calls[1].path,'/api/publish/vercel/files');const body=calls[2].body;
+  assert.equal(calls.length,4);assert.equal(calls[0].path,'/api/developer/game-updates');assert.deepEqual(calls[0].body,{updateId:prepared.updateId,gameSlug:'original'});
+  assert.equal(calls[1].path,'/api/publish/vercel/files');assert.equal(calls[1].body.files.length,200);assert.equal(calls[2].path,'/api/publish/vercel/files');assert.equal(calls[3].path,'/api/publish');const body=calls[3].body;
   assert.equal(body.buildMethod,'vercel-output');assert.equal(body.source,'local');assert.equal(body.gameSlug,'original');assert.equal(body.release.version,'1.0.0');
+  for(const [key,value]of Object.entries(release))assert.equal(body.release[key],value,`unchanged release.${key}`);
   assert.ok(body.files.every(file=>file.receipt));assert.ok(body.files.some(file=>file.file.includes('/node_modules/')));
   assert.equal(body.files.find(file=>file.file.endsWith('/index.js')).data,undefined);
   assert.ok(body.files.find(file=>file.file.endsWith('/.vc-config.json')).data);
   assert.equal(body.files.some(file=>Object.hasOwn(file,'encoding')),false,'receipt protocol has no encoding property');
   assert.ok(calls.every(call=>call.authorization==='Bearer '+'a'.repeat(64)));
-  rejectUpload=true;const failed=await client.callTool({name:'publish_game',arguments:args});assert.equal(failed.isError,true);assert.equal(calls.length,4,'failed upload never proceeds to deploy or retries');
+  rejectUpload=true;const failed=await client.callTool({name:'publish_game',arguments:args});assert.equal(failed.isError,true);
+  assert.equal(calls.length,6,'same-group registration and one failed upload never proceed to deploy or retry');
+  assert.deepEqual(calls.slice(4).map(call=>call.path),['/api/developer/game-updates','/api/publish/vercel/files']);
+  assert.deepEqual(calls[4].body,{updateId:prepared.updateId,gameSlug:'original'});
+  assert.equal(calls.filter(call=>call.path==='/api/publish').length,1,'an upload failure must not submit another deployment');
 });

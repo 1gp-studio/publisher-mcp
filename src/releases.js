@@ -14,6 +14,8 @@ export async function sourceSnapshot(directory) {
   async function walk(path, prefix = '') {
     for (const entry of await readdir(path, { withFileTypes:true })) {
       if (excluded.test(entry.name) || secret.test(entry.name)) continue;
+      // The top-level promotion kit is uploaded separately, never game source/build input.
+      if (!prefix && entry.name.toLowerCase() === '1gp-kit') continue;
       const name = prefix + entry.name, absolute = join(path,entry.name);
       if (entry.isSymbolicLink()) continue;
       if (entry.isDirectory()) { await walk(absolute,name+'/'); continue; }
@@ -30,6 +32,9 @@ export async function sourceSnapshot(directory) {
   return { projectId:createHash('sha256').update(root).digest('hex').slice(0,32), sourceFiles:files, ...(commit?{sourceCommit:commit}:{}) };
 }
 export function compareSources(previous, current) {
+  // Older MCP manifests may contain promotion media. Ignore it on both sides without rewriting history.
+  const gameSource = files => Object.fromEntries(Object.entries(files ?? {}).filter(([path]) => !/^1gp-kit(?:[\\/]|$)/i.test(path)));
+  previous = gameSource(previous); current = gameSource(current);
   if (!previous || !Object.keys(previous).length) return { baselineAvailable:false, added:[], changed:[], removed:[] };
   return { baselineAvailable:true, added:Object.keys(current).filter(k=>!previous[k]).sort(), changed:Object.keys(current).filter(k=>previous[k]&&previous[k]!==current[k]).sort(), removed:Object.keys(previous).filter(k=>!current[k]).sort() };
 }
@@ -50,5 +55,5 @@ export async function prepareRelease(platform, directory, gameSlug, dockerProjec
   return { ...context, ...updateRoute(context), previous: context.previous ? {...context.previous,source_manifest:undefined}:null,
     comparison:compareSources(context.previous?.source_manifest,snapshot.sourceFiles),
     sourceCommit:snapshot.sourceCommit,
-    instructions:'Read the changed local files to understand gameplay, levels, balance, fixes, UX and assets. File names alone do not establish major/minor changes. Use major for substantial redesign/save incompatibility, minor for new gameplay or levels, patch for fixes/balance, assets for resource-only changes (patch increment). Start at 1.0.0. Choose the corresponding suggested version and write concise player-facing notes by relevant area. If no baseline exists, inspect actual code and describe only verified changes; never invent a comparison. Then follow channel/nextSteps: supply release {version,title,notes,changeType} to the matching tool (update_github_game, publish_game, publish_link or publish_docker_game); the platform attaches notes to the build and exposes them only after success.' };
+    instructions:'Read the changed local files to understand gameplay, levels, balance, fixes, UX and assets. File names alone do not establish major/minor changes. Use major for substantial redesign/save incompatibility, minor for new gameplay or levels, patch for fixes/balance, assets for resource-only changes (patch increment). Start at 1.0.0. Choose the corresponding suggested version and write concise player-facing notes by relevant area. If no baseline exists, inspect actual code and describe only verified changes; never invent a comparison. Before actual publication, obtain and reuse the logical updateId from prepare_game. Then follow channel/nextSteps: supply release {updateId,version,title,notes,changeType} to the matching tool (update_github_game, publish_game, publish_link or publish_docker_game); the platform attaches notes to the build and exposes them only after success.' };
 }

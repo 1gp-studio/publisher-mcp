@@ -1,4 +1,5 @@
 import { readFile,readdir,lstat,realpath } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import { prepareGameText } from './text-check.js';
 import { fontCoverage } from './fonts.js';
 import { resolve,isAbsolute,join,relative,sep,basename } from 'node:path';
@@ -6,7 +7,7 @@ import { resolve,isAbsolute,join,relative,sep,basename } from 'node:path';
 // In-game text in every site language (platform docs/todo/game-translation.md, layer 1).
 // The convention: player-facing text by key (t('start')), one file in the game's own language,
 // the platform keeps the translations and serves /i18n/<game>/<lang>.json; the game reads ?lang=
-// first (AIMadeGames.lang() / AIMadeGames.i18n() in the SDK).
+// first (AIWanna.lang() / AIWanna.i18n() in the SDK).
 export const siteLanguages=['zh','en','ja','ko','es'];
 // Existing game files and explicit language choices remain supported independently of the website menu.
 export const supportedGameLanguages=['zh','zh-Hant','en','es','pt-BR','ja','ko','de','fr','ru'];
@@ -58,8 +59,8 @@ export async function checkGameLanguages(projectDirectory){
     let text;try{text=await projectFile(directory,path,2000000);}catch{continue;}
     if(/[?&]lang=|searchParams\.get\(\s*['"]lang['"]\)|get\(\s*['"]lang['"]\s*\)/.test(text))signals.readsLangParam=true;
     if(/navigator\.languages?\b|OS\.get_locale\(|TranslationServer/.test(text))signals.readsBrowserLanguage=true;
-    if(/AIMadeGames\.lang\(/.test(text)){signals.usesSdkLang=true;signals.readsLangParam=true;}
-    if(/AIMadeGames\.i18n\(/.test(text)){signals.usesSdkI18n=true;signals.readsLangParam=true;}
+    if(/AIWanna\.lang\(/.test(text)){signals.usesSdkLang=true;signals.readsLangParam=true;}
+    if(/AIWanna\.i18n\(/.test(text)){signals.usesSdkI18n=true;signals.readsLangParam=true;}
     if(/\bi18next\b|vue-i18n|react-intl|@formatjs|\bpolyglot\b/i.test(text))signals.i18nLibrary=true;
     signals.keyCalls+=(text.match(/\bt\(\s*['"][\w.:-]+['"]/g)??[]).length;
     signals.hanTextLines+=text.split('\n').filter(line=>/['"`>][^'"`<]*[一-鿿]/.test(line)).length;
@@ -76,17 +77,17 @@ export async function checkGameLanguages(projectDirectory){
   const nextSteps=[];
   if(signals.usesSdkI18n)nextSteps.push('已接平台多语言：用 get_game_text_status 核对，再用 upload_game_text 上传改过的原始语言文件和目标语言缺失或过期的翻译。');
   else if(multilingual){
-    if(!signals.readsLangParam)nextSteps.push('游戏已有多语言，但打开时没读 ?lang=：改成先读 ?lang=（或 AIMadeGames.lang()），再看浏览器语言。');
-    nextSteps.push(`发布后用 set_game_details 把实际支持的语言（${languages.join(', ')||'检查代码确认'}）告诉平台；要补齐网站目标语言，可以改用平台多语言（键名 + 原始语言文件 + AIMadeGames.i18n），再 upload_game_text。`);
-  }else nextSteps.push('还没做多语言。先问用户「要不要做成多语言」；同意后按 convention 改造：玩家看到的文字换成键名，写一份原始语言 JSON，接 AIMadeGames.i18n；用你自己的能力补齐目标语言，发布后 upload_game_text 上传。用户不同意就照原样发布。');
+    if(!signals.readsLangParam)nextSteps.push('游戏已有多语言，但打开时没读 ?lang=：改成先读 ?lang=（或 AIWanna.lang()），再看浏览器语言。');
+    nextSteps.push(`发布后用 set_game_details 把实际支持的语言（${languages.join(', ')||'检查代码确认'}）告诉平台；要补齐网站目标语言，可以改用平台多语言（键名 + 原始语言文件 + AIWanna.i18n），再 upload_game_text。`);
+  }else nextSteps.push('还没做多语言。先问用户「要不要做成多语言」；同意后按 convention 改造：玩家看到的文字换成键名，写一份原始语言 JSON，接 AIWanna.i18n；用你自己的能力补齐目标语言，发布后 upload_game_text 上传。用户不同意就照原样发布。');
   nextSteps.push(`默认目标语言按 ${siteLanguages.join('、')} 的顺序，按需补齐其中除原始语言外缺失或过期的翻译；原始语言不在这五种中时保留原文，并补齐这五种目标。保留已有其他语言，不要求新增它们。`);
   nextSteps.push(`发布后用 set_game_details 按需补齐网站目标语言（${siteLanguages.join('、')}）的游戏名（短、像游戏名，不逐字直译；专有名词可保留）和简介（意思和语气不变、读起来自然），先给用户看；保留已有其他语言名称和简介。`);
   return {multilingual,languages,languageFiles:files.slice(0,40),signals,scannedFiles:scanned,siteLanguages,supportedGameLanguages,nextSteps,convention};
 }
 export const convention=[
   '玩家看到的文字都用键名显示（t(\'start\')）；游戏只带一份原始语言的 JSON（{"键名": "文字"}，可用 {0}、{name} 占位）。',
-  '加载平台 SDK：<script src="https://www.ai-made.games/sdk/v1.js"></script>，用 AIMadeGames.i18n({ game: \'<游戏 slug>\', original, originalLang: \'zh\' }).then(t => …) 取文字；请求失败或缺条目时用 original。',
-  `默认语言：先读 ?lang=（网站当前提供 ${siteLanguages.join('、')}），没有再看浏览器语言；SDK 的 AIMadeGames.lang() 已按这个顺序。游戏里可以有语言切换，但打开时必须听 ?lang=；已有其他语言的读取和切换保留。`,
+  '加载平台 SDK：<script src="https://www.ai-made.games/sdk/v1.js"></script>，用 AIWanna.i18n({ game: \'<游戏 slug>\', original, originalLang: \'zh\' }).then(t => …) 取文字；请求失败或缺条目时用 original。',
+  `默认语言：先读 ?lang=（网站当前提供 ${siteLanguages.join('、')}），没有再看浏览器语言；SDK 的 AIWanna.lang() 已按这个顺序。游戏里可以有语言切换，但打开时必须听 ?lang=；已有其他语言的读取和切换保留。`,
   '字体：中日韩要有能显示这些字的字体，别只用拉丁像素字体；已有其他语言也保留所需字体。按钮和固定宽度的地方给变长的文字留余量。',
   `翻译：默认按 ${siteLanguages.join('、')} 的顺序补齐缺失或过期的目标语言条目，跳过原始语言；原始语言不在这五种中时保留原文并补齐这五种目标。保留已有其他语言，不要求新增它们。按游戏的语气翻，按钮短而清楚，占位符原样保留，专有名词不硬译。每种语言一个 JSON，键名和原始语言文件完全一致。`,
   '游戏名：语言文件里用 meta.title 放这个语言的游戏名，上传时平台用它补上缺的各语言游戏名（和平台已有的不一样时只提醒，不覆盖）。',
@@ -98,6 +99,11 @@ export const convention=[
 export async function uploadGameText(platform,projectDirectory,gameSlug,original,translations=[],{force=false,separators=[]}={}){
   const path=`/api/developer/language-files/${encodeURIComponent(gameSlug)}`,uploaded=[],titles={filled:[],conflicts:[]};
   const fail=(error,failed)=>({...error,uploaded,failed:error.failed??failed});
+  const initialPlatform=platform, token=typeof platform.token==='function'?await platform.token():null;
+  if(typeof platform.token==='function'&&!token)return fail({error:'请先连接平台。',code:'AUTH_REQUIRED'},'authorization');
+  if(token){platform=Object.create(initialPlatform);platform.request=(url,options={})=>initialPlatform.request(url,{...options,token});}
+  const changed=async()=>token&&await initialPlatform.token()!==token;
+  const accountError={error:'连接账号已变更，请使用当前账号重新检查后继续。',code:'ACCOUNT_CHANGED'};
   if(!isAbsolute(projectDirectory))return fail({error:'请提供当前游戏项目的绝对路径。'},'files');
   let directory;try{directory=await realpath(resolve(projectDirectory));}catch{return fail({error:'无法读取项目目录。'},'files');}
   if(!Array.isArray(translations)||translations.length>supportedGameLanguages.length)return fail({error:'译文列表格式不对。'},'files');
@@ -128,21 +134,29 @@ export async function uploadGameText(platform,projectDirectory,gameSlug,original
   // snapshots we checked, even if a later filesystem edit occurs while requests are in flight.
   const prepared=await prepareGameText(directory,source,translations,{separators});
   if(prepared.error)return fail(prepared,'files');
+  // Bind every translation to the exact source text that passed local validation. The API
+  // checks this fingerprint under the same database lock as the write, including forced uploads.
+  const expectedOriginal={locale:prepared.original.locale,hash:createHash('sha256').update(JSON.stringify(Object.keys(prepared.original.entries).sort().map(key=>[key,prepared.original.entries[key]]))).digest('hex')};
   const check=prepared.check;
   if(!check.ok&&!force)return fail({error:'译文检查没通过，先修好再上传（检查结果见 errors）。',code:'TEXT_CHECK_FAILED',...check},check.errors[0]?.locale??'files');
-  const queue=[...(original?[{...prepared.original,kind:'original'}]:[]),...prepared.translations.map(item=>({...item,kind:'translation',by:'ai_creator'}))];
+  const queue=[...(original?[{...prepared.original,kind:'original'}]:[]),...prepared.translations.map(item=>({...item,kind:'translation',by:'ai_creator',expectedOriginal}))];
+  for(const item of queue)if(Buffer.byteLength(JSON.stringify(item))>400000)return fail({error:`${item.locale} 的上传内容不能超过 400 KB。`,code:'INVALID_LANGUAGE_FILE'},item.locale);
   const note=result=>{if(result.titleSync){titles.filled.push(...(result.titleSync.filled??[]));titles.conflicts.push(...(result.titleSync.conflicts??[]));}};
   let failed=queue[0]?.locale??'files';
   try{
     for(const item of queue){
       failed=item.locale;
+      if(await changed())return fail(accountError,failed);
       const result=await platform.request(path,{method:'PUT',body:item});
       if(!result||typeof result!=='object')return fail({error:'平台返回异常响应，请查询状态后继续。',code:'PLATFORM_ERROR'},failed);
       if(result.error)return fail(result,failed);
+      if(!Array.isArray(result.status)||!result.files||typeof result.files!=='object'||!result.files[item.locale]||typeof result.files[item.locale].entries!=='object')return fail({error:'平台没有返回有效的上传确认，请查询状态后继续。',code:'PLATFORM_ERROR',unconfirmed:item.locale},failed);
       uploaded.push(item.locale);note(result);
     }
     failed='status';
+    if(await changed())return fail(accountError,failed);
     const status=await gameTextStatus(platform,gameSlug);
+    if(await changed())return fail(accountError,failed);
     if(status.error)return fail(status,failed);
     return {ok:true,uploaded,
       // meta.title fills a language's game name the platform did not have; a different one is only reported.
@@ -153,8 +167,8 @@ export async function uploadGameText(platform,projectDirectory,gameSlug,original
 // Per language: up to date, missing keys, or made from an older original (only those need translating).
 export async function gameTextStatus(platform,gameSlug){
   const data=await platform.request(`/api/developer/language-files/${encodeURIComponent(gameSlug)}`);
-  if(!data||typeof data!=='object'||(data.status!==undefined&&!Array.isArray(data.status)))return {error:'平台返回异常状态，请稍后查询。',code:'PLATFORM_ERROR'};
-  if(data.error)return data;
+  if(data?.error)return data;
+  if(!data||typeof data!=='object'||!Array.isArray(data.status)||data.status.some(item=>!item||typeof item!=='object'||!supportedGameLanguages.includes(item.locale)||typeof item.state!=='string'))return {error:'平台返回异常状态，请稍后查询。',code:'PLATFORM_ERROR'};
   return {platformTranslation:data.engine??null,status:(data.status??[]).map(item=>({locale:item.locale,state:item.state,total:item.total,done:item.done,missing:item.missing,stale:item.stale,editedByCreator:item.edited}))};
 }
 export async function setGameDetails(platform,gameSlug,{titles,descriptions,languages}){
