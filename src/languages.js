@@ -96,8 +96,9 @@ export const convention=[
 ].join('\n');
 
 // Upload the game's own file, then each translation (marked as made by the creator's AI).
-export async function uploadGameText(platform,projectDirectory,gameSlug,original,translations=[],{force=false,separators=[]}={}){
-  const path=`/api/developer/language-files/${encodeURIComponent(gameSlug)}`,uploaded=[],titles={filled:[],conflicts:[]};
+export async function uploadGameText(platform,projectDirectory,gameSlug,original,translations=[],{force=false,separators=[],use='keys'}={}){
+  if(!['keys','phrases'].includes(use))return {error:'文字模式不受支持。',code:'INVALID_USE'};
+  const path=`/api/developer/language-files/${encodeURIComponent(gameSlug)}${use==='phrases'?'?use=phrases':''}`,uploaded=[],titles={filled:[],conflicts:[]};
   const fail=(error,failed)=>({...error,uploaded,failed:error.failed??failed});
   const initialPlatform=platform, token=typeof platform.token==='function'?await platform.token():null;
   if(typeof platform.token==='function'&&!token)return fail({error:'请先连接平台。',code:'AUTH_REQUIRED'},'authorization');
@@ -134,6 +135,8 @@ export async function uploadGameText(platform,projectDirectory,gameSlug,original
   // snapshots we checked, even if a later filesystem edit occurs while requests are in flight.
   const prepared=await prepareGameText(directory,source,translations,{separators});
   if(prepared.error)return fail(prepared,'files');
+  if(use==='phrases'&&Object.entries(prepared.original.entries).some(([key,text])=>!text.trim()||text!==text.trim()||key!=='p.'+createHash('sha256').update(text).digest('hex')))
+    return fail({error:'原文词表编号必须是原文SHA-256，请重新提取；force不能绕过。',code:'INVALID_PHRASE_ORIGINAL'},'original');
   // Bind every translation to the exact source text that passed local validation. The API
   // checks this fingerprint under the same database lock as the write, including forced uploads.
   const expectedOriginal={locale:prepared.original.locale,hash:createHash('sha256').update(JSON.stringify(Object.keys(prepared.original.entries).sort().map(key=>[key,prepared.original.entries[key]]))).digest('hex')};
@@ -155,7 +158,7 @@ export async function uploadGameText(platform,projectDirectory,gameSlug,original
     }
     failed='status';
     if(await changed())return fail(accountError,failed);
-    const status=await gameTextStatus(platform,gameSlug);
+    const status=await gameTextStatus(platform,gameSlug,{use});
     if(await changed())return fail(accountError,failed);
     if(status.error)return fail(status,failed);
     return {ok:true,uploaded,
@@ -165,8 +168,9 @@ export async function uploadGameText(platform,projectDirectory,gameSlug,original
   }catch(error){return fail({error:error.message},failed);}
 }
 // Per language: up to date, missing keys, or made from an older original (only those need translating).
-export async function gameTextStatus(platform,gameSlug){
-  const data=await platform.request(`/api/developer/language-files/${encodeURIComponent(gameSlug)}`);
+export async function gameTextStatus(platform,gameSlug,{use='keys'}={}){
+  if(!['keys','phrases'].includes(use))return {error:'文字模式不受支持。',code:'INVALID_USE'};
+  const data=await platform.request(`/api/developer/language-files/${encodeURIComponent(gameSlug)}${use==='phrases'?'?use=phrases':''}`);
   if(data?.error)return data;
   if(!data||typeof data!=='object'||!Array.isArray(data.status)||data.status.some(item=>!item||typeof item!=='object'||!supportedGameLanguages.includes(item.locale)||typeof item.state!=='string'))return {error:'平台返回异常状态，请稍后查询。',code:'PLATFORM_ERROR'};
   return {platformTranslation:data.engine??null,status:(data.status??[]).map(item=>({locale:item.locale,state:item.state,total:item.total,done:item.done,missing:item.missing,stale:item.stale,editedByCreator:item.edited}))};

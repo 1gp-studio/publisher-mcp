@@ -6,7 +6,7 @@
 
 需要 Node.js 24+、npm（首次从 GitHub 安装 MCP 时需要 Git）。游戏本身不需要 Git 仓库。这是标准的 stdio MCP 服务，任何 MCP 客户端都能使用。
 
-**只装一次，装在用户级。** 一份安装对你所有的游戏项目都有效，不要在每个游戏项目里各装一份，也不要在游戏目录里新建 `.mcp.json`。固定版本不会自行升级：先读取实际 MCP 握手 `serverInfo.version`，或调用 `get_publisher_info`；本流程需要 **0.9.0 或更高兼容版本**。低版本只更新当前客户端已有 1GP 配置里的固定版本，保留其他参数、环境配置和授权凭证；更高兼容版本不降级。
+**只装一次，装在用户级。** 一份安装对你所有的游戏项目都有效，不要在每个游戏项目里各装一份，也不要在游戏目录里新建 `.mcp.json`。固定版本不会自行升级：先读取实际 MCP 握手 `serverInfo.version`，或调用 `get_publisher_info`；本流程需要 **0.10.0 或更高兼容版本**。低版本只更新当前客户端已有 1GP 配置里的固定版本，保留其他参数、环境配置和授权凭证；更高兼容版本不降级。
 
 更新后重新加载 MCP，再核对实际运行版本和工具；客户端无法重载时才请用户重启。配置已经写成新版、工具名称已经存在，都不能证明旧进程已经升级。读不到版本时说明情况，不假定已经完成。
 
@@ -19,7 +19,7 @@
 ```toml
 [mcp_servers.onegp]
 command = "npx"
-args = ["--yes", "github:1gp-studio/publisher-mcp#v0.9.0"]
+args = ["--yes", "github:1gp-studio/publisher-mcp#v0.10.0"]
 startup_timeout_sec = 60
 tool_timeout_sec = 600
 ```
@@ -33,7 +33,7 @@ tool_timeout_sec = 600
 在终端运行一次（`--scope user` 对你本人的所有项目生效）：
 
 ```sh
-claude mcp add onegp --scope user -- npx --yes github:1gp-studio/publisher-mcp#v0.9.0
+claude mcp add onegp --scope user -- npx --yes github:1gp-studio/publisher-mcp#v0.10.0
 ```
 
 已经装过时，用 `claude mcp list` 确认当前生效的配置，只更新其中固定的包版本；保留既有参数和环境配置，不删除 1GP 的授权凭证。上面的命令用于首次安装，不需要每次发布都重新添加。
@@ -180,11 +180,29 @@ Godot 也使用同一个 `gameSlug` 参数，不需要 `output_directory`。平�
 | set_game_media(project_directory, gameSlug, cover?, screenshots?, preview?, fillMissing?) | 上传已准备好的主封面、实机截图和预览；只补缺主封面/预览，截图追加并按内容去重，保留现有物料 |
 | update_github_game(project_directory, gameSlug, release) | 更新从 GitHub 发布的游戏：确认这是游戏的仓库、改动已提交并推送到发布分支，再让平台从最新提交重新构建；不会替你推送 |
 | check_game_languages(project_directory) | 只读检查游戏有没有做多语言（语言文件、`?lang=`、浏览器语言、1GP SDK），返回检测到的语言、下一步和接入约定 |
-| upload_game_text(project_directory, gameSlug, original?, translations?) | 上传游戏自己的原始语言文件和你的 AI 翻好的各语言文件（`{"键名": "文字"}`），平台在 `/i18n/<游戏>/<语言>.json` 提供给玩家 |
-| get_game_text_status(gameSlug) | 每种语言：已翻译、缺哪些键、哪些键的原文改过要重翻 |
+| upload_game_text(project_directory, gameSlug, original?, translations?, use?) | 上传游戏自己的原始语言文件和你的 AI 翻好的各语言文件（`{"键名": "文字"}`），平台在 `/i18n/<游戏>/<语言>.json` 提供给玩家 |
+| get_game_text_status(gameSlug, use?) | 每种语言：已翻译、缺哪些键、哪些键的原文改过要重翻 |
+| get_game_text_source(gameSlug, use?) | 只读自动来源配置、来源指纹、待审候选与翻译状态；prepare_game.textSources 已含两种模式 |
+| configure_game_text_source(gameSlug, enabled, locale, files, use?, excluded?, scan?) | 以当前 revision 保存设置，启用时默认扫描一次；不构建、不发布 |
+| approve_game_text_candidates(gameSlug, keys, expectedRevision, expectedFingerprint) | 仅批准逐项审查的短语候选，绑定 config.revision 和 source_fingerprint |
 | set_game_details(gameSlug, titles?, descriptions?, languages?, genre?, tags?, fillMissing?) | 游戏名、简介和支持的语言；fillMissing:true 还可补缺分类和作者主语言标签，保留已有内容 |
 
 v0.9.0 还提供 `get_publisher_info`（实际运行版本和能力）、`get_game_materials`（页面物料与封面预览）、`get_game_announcement`（首发宣传资格和草稿）、`publish_game_announcement`（发布已批准的首发帖子）。`set_game_details` 与 `set_game_covers` 的 `fillMissing:true` 用于只补缺失文案或未设置的封面模式，保留已有内容和作者选择。
+
+### 自动同步游戏文字
+
+已接入游戏可以登记公开原文来源。平台按当前游戏入口读取，不改变原发布渠道：
+
+- `keys`：选一份公开 JSON 原文，例如 `locales/zh.json`，适合全自动更新。
+- `phrases`：选最多 16 份 HTML/JS/MJS/PCK 文件，例如 `index.html`、`assets/game.js`。明确显示文本可自动登记，其余进入 `pending_entries`，逐项确认后调用批准工具。日志、内部标识和玩家输入不能当作游戏文案批准。
+
+`configure_game_text_source` 先读取配置，再以该 revision 保存，遇到并发修改不覆盖。`scan` 默认为 true，启用设置后只请求一次有限扫描；false 只保存，关闭时也不扫描。已有设置通过 `prepare_game.textSources` 复用，不重复询问；旧服务器不支持或读取失败会标为不可用，不能当作关闭。来源文件相对当前公开游戏入口，不是本地源码路径，也不能填任意外部 URL。
+
+后台每五分钟检查已启用来源，更新后沿用既有补翻队列，保留作者逐条校对。配置、扫描和翻译状态分开看：`engine: null` 表示平台翻译服务未启用，需要宿主 AI 补齐目标语言并上传；扫描失败不能宣称同步完成。批准候选必须使用同一份 `config.revision` 和 `config.source_fingerprint`，快照改变须重新审查，不能自动批准新内容。
+
+`upload_game_text` 与 `get_game_text_status` 的 `use` 默认 keys，可传 phrases；两套词表相互隔离。短语原文键是 `p.<去除首尾空白后原文的完整 SHA-256>`，原文本身不得带首尾空白。上传前会验证编号，force 不能跳过。AI 译文上传须包含完整文件，不能仅上传新增片段；此前作者标记校对的条目仍被保留。
+
+首次仍需在游戏里接入 SDK 或显示桥；Godot 新自绘、换行、字体和缓存路径仍须复核。`integration.state: not_verified` 明确表示显示尚未验证。图片文字、语音和未知引擎渲染不保证覆盖。配置保存不等于游戏已翻译，不触发发布；`wait_for_publish` 继续只查询构建状态。
 
 ### 常规上架物料
 
@@ -205,6 +223,15 @@ MCP **负责检查、上传和保存，不内置浏览器截图、录屏或图�
 平台目前限制全站同时 2 个构建、每个账号最多 50 个作品，不设每日次数限制。账号邮箱验证由 Supabase 负责；平台管理员必须配置生产邮件服务，才能支持组织外用户收取登录邮件。1GP 托管团队的 Vercel 套餐及运行限制仍适用；不占用用户个人 Vercel 账号。GitHub 来源继续遵守仓库授权与构建限制。
 
 开发时可使用 `ONEGP_PLATFORM_URL` 指向另一 HTTPS 平台，或本机 HTTP localhost/127.0.0.1；凭证按平台分别保存。测试运行 `npm test`，包括真实 MCP stdio 客户端集成测试。
+
+## v0.10.0：自动文字来源与更新补翻
+
+- 新增 `get_game_text_source`、`configure_game_text_source` 和 `approve_game_text_candidates`。按当前公开游戏入口登记 JSON 原文或 HTML/JS/MJS/PCK 来源，沿用现有发布渠道；设置与候选批准分别绑定 revision 和来源指纹，遇到并发变化不会覆盖或自动重试。
+- `prepare_game.textSources` 只读返回 keys / phrases 设置与状态，复用已有配置。配置启用后默认请求一次有限扫描；后台检查新版本并沿用既有补翻队列，保留作者校对。扫描排队、失败或结果被并发更新取代均如实报告，平台没有翻译服务时明确需要宿主 AI 补译。
+- `upload_game_text` 和 `get_game_text_status` 新增 `use=phrases`，与 keys 词表隔离。短语原文使用完整 SHA-256 编号；AI 译文仍上传完整文件，原文指纹、占位符、文件安全和作者校对保护继续生效。
+- 配置成功不等于游戏显示已接通。首次 SDK / Godot 显示桥、字体、换行和缓存仍需验证，新自绘路径仍需复核；本版本不在等待发布时暗中修改游戏或触发部署。
+
+需要配套平台接口、后台任务和 `202610220007_game_text_sources.sql` 迁移（及已有 v0.9.0 基础迁移）。先完成平台迁移、验证与部署，再发布 MCP v0.10.0 标签；更新用户级配置后重载并核对实际运行版本。
 
 ## v0.9.0：版本核对、完整上架物料、可选首发宣传与合并更新
 

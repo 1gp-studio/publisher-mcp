@@ -166,6 +166,7 @@ test('prepare_game aggregates preparation once, remembers only explicit choices,
     if (path === '/api/developer/games/match') return { body: { matches: [{ slug: 'owned-game', title: 'Owned game' }] } };
     if (path === '/api/publish/releases/context') return { body: { gameSlug: 'owned-game', source: 'local', previous: null } };
     if (path === '/api/developer/game-materials/owned-game') return { body: { game: { id: gameId, slug: 'owned-game' }, original: { locale: 'zh' }, languages: [], covers: {} } };
+    if (path === '/api/developer/text-source/owned-game') return { body: { config: null, engine: null, status: [], integration: { state: 'not_verified', message: 'Renderer integration needs verification' } } };
     assert.equal(path, '/api/developer/game-integrations/owned-game'); assert.equal(request.method, 'GET');
     return { body: state() };
   });
@@ -181,7 +182,9 @@ test('prepare_game aggregates preparation once, remembers only explicit choices,
   assert.equal(data.languageCheck.multilingual, false); assert.equal(data.integrations.cloudSaves.enabled, false);
   assert.deepEqual(data.features, { multilingual: null, cloudSaves: null, leaderboards: null, announcement: null });
   assert.deepEqual(data.decisions, ['multilingual', 'cloudSaves', 'leaderboards']);
-  assert.equal(f.requests.length, 4, 'One game match, release context, integrations and materials read');
+  assert.equal(f.requests.length, 6, 'One game match, release context, integrations, materials and each text source mode read');
+  assert.deepEqual(f.requests.filter(request => request.url.includes('/text-source/')).map(request => request.url).sort(), ['/api/developer/text-source/owned-game?use=keys', '/api/developer/text-source/owned-game?use=phrases']);
+  assert.deepEqual(Object.keys(data.textSources).sort(), ['keys', 'phrases']);
   const selected = parsed(await f.client.callTool({ name: 'prepare_game', arguments: { ...args, features: { cloudSaves: true, leaderboards: false } } }));
   assert.deepEqual(selected.features, { multilingual: null, cloudSaves: true, leaderboards: false, announcement: null });
   assert.equal(selected.integrations.cloudSaves.enabled, false, 'Remembered intention must not be reported as an enabled service');
@@ -189,7 +192,7 @@ test('prepare_game aggregates preparation once, remembers only explicit choices,
   assert.deepEqual(parsed(await resumed.callTool({ name: 'prepare_game', arguments: args })).features, selected.features);
   await f.credentials(tokenB);
   assert.deepEqual(parsed(await resumed.callTool({ name: 'prepare_game', arguments: args })).features, data.features, 'A different account has no inherited consent');
-  assert.equal(f.requests.length, 16);
+  assert.equal(f.requests.length, 24);
   assert.ok(f.requests.every(request => request.method === 'GET' || request.url === '/api/developer/games/match'));
   await assert.rejects(stat(join(game, 'ran-build')), { code: 'ENOENT' });
   assert.equal(await readFile(join(game, 'dist', 'index.html'), 'utf8'), '<canvas>Game</canvas>');

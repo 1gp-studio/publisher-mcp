@@ -7,6 +7,7 @@ import { inspectGame } from './inspect.js';
 import { checkGameLanguages } from './languages.js';
 import { getGameIntegrations } from './integrations.js';
 import { getGameMaterials } from './materials.js';
+import { getGameTextSource } from './text-source.js';
 import { preparePromotion } from './promotion.js';
 import { prepareGameUpdate } from './game-updates.js';
 import packageInfo from '../package.json' with { type: 'json' };
@@ -80,10 +81,11 @@ export async function prepareGame(platform, projectDirectory, options = {}) {
   const release = await prepareRelease(client, root, options.gameSlug, options.dockerProject);
   if (await changed()) return accountChanged();
   if (release.error || release.code === 'CHOOSE_GAME') return release;
-  const [inspection, languageCheck, integrations, materials] = await Promise.all([
+  const [inspection, languageCheck, integrations, materials, textSources] = await Promise.all([
     inspectGame(root, options.buildOptions), checkGameLanguages(root),
     release.gameSlug ? getGameIntegrations(client, release.gameSlug) : Promise.resolve(null),
     release.gameSlug ? getGameMaterials(client, release.gameSlug).catch(() => ({ error: '暂时无法读取平台物料；先恢复连接，不能把未知状态当作缺失。', code: 'MATERIALS_UNAVAILABLE' })) : Promise.resolve(null),
+    release.gameSlug ? Promise.all(['keys', 'phrases'].map(async use => [use, await getGameTextSource(client, release.gameSlug, use)])).then(Object.fromEntries) : Promise.resolve(null),
   ]);
   if (await changed()) return accountChanged();
   // Keep the original path for the safety checks; realpath must not hide a linked kit ancestor.
@@ -97,19 +99,22 @@ export async function prepareGame(platform, projectDirectory, options = {}) {
   if (update?.error && update.code !== 'UPDATE_STORAGE_ERROR') return update;
   const live = integrations?.error ? null : integrations;
   const requested = Object.fromEntries(featureNames.map(name => [name, choices[name] ?? (
-    name === 'multilingual' && languageCheck.multilingual || name === 'cloudSaves' && live?.cloudSaves?.enabled || name === 'leaderboards' && live?.leaderboards?.length ? true : null
+    name === 'multilingual' && (languageCheck.multilingual || Object.values(textSources ?? {}).some(source => !source.error && source.config?.enabled)) || name === 'cloudSaves' && live?.cloudSaves?.enabled || name === 'leaderboards' && live?.leaderboards?.length ? true : null
   )]));
+  const textSourceEnabled = Object.values(textSources ?? {}).some(source => !source.error && source.config?.enabled);
   // The standalone language checker can suggest asking about initial setup. Combined preparation
   // already knows the author's choice; keep nested guidance consistent with that choice too.
   if (requested.multilingual === false) {
     languageCheck.nextSteps = ['作者已选择本次不做多语言改造，保留游戏当前语言和已有功能，不重复询问或关闭已有多语言。'];
+  } else if (textSourceEnabled) {
+    languageCheck.nextSteps = ['已有自动文字来源配置，沿用 textSources 中的模式和文件，不重复询问或重新配置。配置和词表就绪不等于 SDK/Godot 显示接入已验证；核对 integration、待审条目与实际游戏。', ...languageCheck.nextSteps.slice(1)];
   } else if (requested.multilingual === true && !languageCheck.multilingual) {
     languageCheck.nextSteps = ['作者已选择接入多语言，按 convention 改造并验证，无需再次询问。', ...languageCheck.nextSteps.slice(1)];
   }
-  return { project_directory: root, ...release, inspection, languageCheck, integrations, materials, promotion, publisherVersion: packageInfo.version, features: requested,
+  return { project_directory: root, ...release, inspection, languageCheck, integrations, materials, textSources, promotion, publisherVersion: packageInfo.version, features: requested,
     ...(update?.error ? { updateWarning: update } : update ? { updateId: update.id, update } : {}),
     ...(preferenceWarning ? { preferenceWarning } : {}),
     decisions: featureNames.filter(name => requested[name] === null && (name !== 'announcement' || release.channel === 'new')),
-    instructions: `${release.instructions}\n先执行 promotion 的分类、主语言标签、主封面、真实截图和短实机预览五项清单；它独立于多语言选择。依据代码和实玩证据用 set_game_details 只补缺失 genre/tags，用 set_game_media 上传已核对的主封面、截图和预览；复用现有素材，已有作者截图不足 3 张时建议补到 3–5 张；仅有精选截图时直接复用，因为新增作者图会替换整组精选展示，不为凑数自动上传。保留作者关闭预览。MCP 不自带截图、图像或视频生成，缺少宿主工具时如实列出阻碍。平台物料状态未知先恢复读取；上传成功或部署 ready 都不能代替实际视觉/播放验证。\n准备已包含游戏识别、发布渠道、项目检查和语言检查，不必再单独 find_my_game、prepare_release 或 check_game_languages；仅源码/配置变化后重查相关项。只集中询问尚未决定且本次相关的功能，已有会话授权和已保存选择直接沿用。features 是作者意向，不代表已接入；false 不会关闭已有功能。云存档/排行榜默认不改，只有作者选择时才用配置工具和专属接入说明修改游戏。配置接口失败时先解决，不把未知状态当作未启用。materials 包含已有物料，读取失败时先解决，不能把未知状态当作空白。多语言需包含游戏文字、名字、简介和同一底图叠加译名的自动封面；保留已有作者设置。首次发布可集中询问 announcement；它只记住发帖意向，发布具体内容还需作者批准，可与物料和发布方案一次确认。更新不自动发首发宣传帖，宣传失败不得重发游戏。尽量先完成全部选定功能再做一次最终发布。新游戏必须先发布以获得真实 ID 时，必要的中间部署与随后接入功能后的部署沿用本次 updateId，不得编造 ID 或宣称已接通。重查或记住 features 时传同一 update_id；所有渠道发布均带 release.updateId。仅修改平台语言文件、名称、简介、封面或配置，不因物料改动重新发布。中间部署不发社区日志；最终 ready 且网页、接口和所有选定功能验证后才 complete_game_update 一次，汇总最终说明；首发组跳过更新日志。收尾失败只重试同一更新，不重发游戏。发布成功返回 build ID 后用 wait_for_publish 继续原任务；结果不明不得重复发布。`,
+    instructions: `${release.instructions}\n先执行 promotion 的分类、主语言标签、主封面、真实截图和短实机预览五项清单；它独立于多语言选择。依据代码和实玩证据用 set_game_details 只补缺失 genre/tags，用 set_game_media 上传已核对的主封面、截图和预览；复用现有素材，已有作者截图不足 3 张时建议补到 3–5 张；仅有精选截图时直接复用，因为新增作者图会替换整组精选展示，不为凑数自动上传。保留作者关闭预览。MCP 不自带截图、图像或视频生成，缺少宿主工具时如实列出阻碍。平台物料状态未知先恢复读取；上传成功或部署 ready 都不能代替实际视觉/播放验证。\n准备已包含游戏识别、发布渠道、项目检查和语言检查，不必再单独 find_my_game、prepare_release 或 check_game_languages；仅源码/配置变化后重查相关项。只集中询问尚未决定且本次相关的功能，已有会话授权和已保存选择直接沿用。features 是作者意向，不代表已接入；false 不会关闭已有功能。云存档/排行榜默认不改，只有作者选择时才用配置工具和专属接入说明修改游戏。配置接口失败时先解决，不把未知状态当作未启用。textSources 只读展示 keys/phrases 自动同步配置；读取失败（含旧服务器不支持）表示不可用，不表示关闭。已有设置直接沿用；新增设置需作者已选择多语言。configure_game_text_source 只登记文件并有限扫描，不构建、不发布，也不代表游戏显示接入已完成；待审候选须逐项核对后按 source_fingerprint 批准。materials 包含已有物料，读取失败时先解决，不能把未知状态当作空白。多语言需包含游戏文字、名字、简介和同一底图叠加译名的自动封面；保留已有作者设置。首次发布可集中询问 announcement；它只记住发帖意向，发布具体内容还需作者批准，可与物料和发布方案一次确认。更新不自动发首发宣传帖，宣传失败不得重发游戏。尽量先完成全部选定功能再做一次最终发布。新游戏必须先发布以获得真实 ID 时，必要的中间部署与随后接入功能后的部署沿用本次 updateId，不得编造 ID 或宣称已接通。重查或记住 features 时传同一 update_id；所有渠道发布均带 release.updateId。仅修改平台语言文件、名称、简介、封面或配置，不因物料改动重新发布。中间部署不发社区日志；最终 ready 且网页、接口和所有选定功能验证后才 complete_game_update 一次，汇总最终说明；首发组跳过更新日志。收尾失败只重试同一更新，不重发游戏。发布成功返回 build ID 后用 wait_for_publish 继续原任务；结果不明不得重复发布。`,
   };
 }

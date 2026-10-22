@@ -28,6 +28,10 @@ async function fixture(t) {
         if (state.materialsNetworkError) throw new Error('Private upstream details must not leak');
         return state.materials ?? { game: { id: 'game', slug: 'test-game' }, original: { locale: 'zh' }, languages: [], covers: {} };
       }
+      if (path.startsWith('/api/developer/text-source/test-game?use=')) {
+        if (state.textSourceError) throw new Error('Old server unavailable');
+        return state.textSources?.[new URL(path, 'https://platform.example').searchParams.get('use')] ?? { config: null, engine: null, status: [], integration: { state: 'not_verified', message: 'Unverified' } };
+      }
       if (path === '/api/developer/game-integrations/test-game') {
         if (state.networkError) throw new Error('Network unavailable');
         return state.integrations;
@@ -40,7 +44,7 @@ async function fixture(t) {
 
 test('preparation finds the game once and includes channel, inspection, language and integration checks', async t => {
   const f = await fixture(t), result = await prepareGame(f.platform, f.project);
-  assert.deepEqual(f.calls.map(call => call.path), ['/api/developer/games/match', '/api/publish/releases/context?slug=test-game', '/api/developer/game-integrations/test-game', '/api/developer/game-materials/test-game']);
+  assert.deepEqual(f.calls.map(call => call.path), ['/api/developer/games/match', '/api/publish/releases/context?slug=test-game', '/api/developer/game-integrations/test-game', '/api/developer/game-materials/test-game', '/api/developer/text-source/test-game?use=keys', '/api/developer/text-source/test-game?use=phrases']);
   assert.equal(result.channel, 'local');
   assert.equal(result.inspection.ready, true);
   assert.equal(result.languageCheck.multilingual, false);
@@ -204,7 +208,7 @@ test('missing account storage cannot erase an explicit choice or persist it unsc
 });
 
 test('an account switch during remote preparation pins reads and never stores A choices for B', async t => {
-  for (const switchAt of ['match', 'context', 'game-integrations', 'game-materials']) await t.test(switchAt, async t => {
+  for (const switchAt of ['match', 'context', 'game-integrations', 'game-materials', 'text-source']) await t.test(switchAt, async t => {
     const f = await fixture(t), tokenA = f.state.token, tokenB = 'b'.repeat(64);
     const fileA = await f.file();
     f.state.token = tokenB;
@@ -271,4 +275,21 @@ test('announcement intent is optional and remembered without posting; updates do
   assert.equal(unavailable.materials.code, 'MATERIALS_UNAVAILABLE');
   assert.deepEqual(unavailable.promotion.unknown, ['genre', 'tags', 'mainCover', 'screenshots', 'preview']);
   assert.doesNotMatch(JSON.stringify(unavailable), /Private upstream details/);
+});
+
+test('preparation reads text sources without reconfiguring or treating an outage as disabled', async t => {
+  const f = await fixture(t);
+  f.state.textSources = { phrases: { config: { enabled: true, locale: 'zh', files: ['index.html'], excluded: [], revision: 3 }, engine: null, status: [], integration: { state: 'not_verified', message: 'Renderer not verified' } } };
+  const current = await prepareGame(f.platform, f.project);
+  assert.equal(current.textSources.keys.config, null); assert.equal(current.textSources.phrases.config.revision, 3);
+  assert.equal(current.features.multilingual, true); assert.ok(!current.decisions.includes('multilingual'));
+  assert.doesNotMatch(current.languageCheck.nextSteps.join(' '), /先问用户|要不要做成多语言/);
+  assert.ok(f.calls.filter(call => call.path.includes('text-source')).every(call => !call.options?.method && !call.options?.body));
+  const explicit = await prepareGame(f.platform, f.project, { features: { multilingual: false } });
+  assert.equal(explicit.features.multilingual, false); assert.equal(explicit.textSources.phrases.config.enabled, true);
+  f.state.textSourceError = true;
+  const unavailable = await prepareGame(f.platform, f.project);
+  assert.equal(unavailable.textSources.keys.code, 'TEXT_SOURCE_UNAVAILABLE');
+  assert.equal(unavailable.textSources.phrases.code, 'TEXT_SOURCE_UNAVAILABLE');
+  assert.equal(Object.hasOwn(unavailable.textSources.phrases, 'config'), false);
 });

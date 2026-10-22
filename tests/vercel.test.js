@@ -189,6 +189,7 @@ test('MCP publishes whole games with receipts, unchanged release/gameSlug and no
     else if(path==='/api/publish/releases/context')res.end(JSON.stringify({gameSlug:'original',source:'local',previous:null}));
     else if(path==='/api/developer/game-integrations/original')res.end(JSON.stringify({game:{id:gameId,slug:'original'},cloudSaves:{enabled:false},leaderboards:[]}));
     else if(path==='/api/developer/game-materials/original')res.end(JSON.stringify({game:{id:gameId,slug:'original'},original:{locale:'en'},languages:[],covers:{}}));
+    else if(path==='/api/developer/text-source/original')res.end(JSON.stringify({config:null,engine:null,status:[],integration:{state:'not_verified',message:'Renderer integration needs verification'}}));
     else if(path==='/api/developer/game-updates'){
       const created=registeredUpdate===null;
       if(registeredUpdate!==null&&registeredUpdate!==body.updateId){res.statusCode=409;res.end(JSON.stringify({code:'UPDATE_GAME_MISMATCH',error:'Unexpected new update'}));return;}
@@ -209,8 +210,8 @@ test('MCP publishes whole games with receipts, unchanged release/gameSlug and no
   const prepared=JSON.parse(preparation.content[0].text);
   assert.equal(prepared.gameSlug,'original');assert.equal(prepared.channel,'local');assert.equal(prepared.inspection.ready,true);
   assert.match(prepared.updateId,/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i);assert.equal(prepared.update.id,prepared.updateId);
-  assert.deepEqual(new Set(calls.map(call=>call.path)),new Set(['/api/developer/games/match','/api/publish/releases/context','/api/developer/game-integrations/original','/api/developer/game-materials/original']));
-  assert.equal(calls.length,4);assert.equal(registeredUpdate,null,'preparation must not register or publish');
+  assert.deepEqual(new Set(calls.map(call=>call.path)),new Set(['/api/developer/games/match','/api/publish/releases/context','/api/developer/game-integrations/original','/api/developer/game-materials/original','/api/developer/text-source/original']));
+  assert.equal(calls.length,6);assert.equal(registeredUpdate,null,'preparation must not register or publish');
   assert.ok(calls.every(call=>call.authorization==='Bearer '+'a'.repeat(64)));calls.length=0;
   const release={updateId:prepared.updateId,version:'1.0.0',title:'First game',notes:'Initial playable game',changeType:'minor'};
   const args={project_directory:root,deployment_target:'vercel',gameSlug:'original',release};
