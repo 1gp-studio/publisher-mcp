@@ -179,13 +179,14 @@ test('prepare_game aggregates preparation once, remembers only explicit choices,
   const args = { project_directory: game, output_directory: 'dist' };
   const initial = await f.client.callTool({ name: 'prepare_game', arguments: args }); assert.equal(initial.isError, false);
   const data = parsed(initial);
-  assert.ok(data.instructions.includes(updateApprovalGuidance.zh));
-  assert.ok(data.instructions.includes(updateHistoryGuidance.zh));
+  assert.ok(data.instructions.includes(updateApprovalGuidance.en));
+  assert.ok(data.instructions.includes(updateHistoryGuidance.en));
+  assert.ok(!data.instructions.includes(updateApprovalGuidance.zh), 'the approval rules appear once');
   assert.equal(data.gameSlug, 'owned-game'); assert.equal(data.channel, 'local'); assert.equal(data.inspection.ready, true);
   assert.equal(data.materials.error, undefined); assert.equal(data.materials.original.locale, 'zh');
   assert.equal(data.languageCheck.multilingual, false); assert.equal(data.integrations.cloudSaves.enabled, false);
   assert.deepEqual(data.features, { multilingual: null, cloudSaves: null, leaderboards: null, announcement: null });
-  assert.deepEqual(data.decisions, ['multilingual', 'cloudSaves', 'leaderboards']);
+  assert.deepEqual(data.decisions, []); assert.deepEqual(data.optionalFeatures, ['multilingual', 'cloudSaves', 'leaderboards']);
   assert.equal(f.requests.length, 6, 'One game match, release context, integrations, materials and each text source mode read');
   assert.deepEqual(f.requests.filter(request => request.url.includes('/text-source/')).map(request => request.url).sort(), ['/api/developer/text-source/owned-game?use=keys', '/api/developer/text-source/owned-game?use=phrases']);
   assert.deepEqual(Object.keys(data.textSources).sort(), ['keys', 'phrases']);

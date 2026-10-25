@@ -66,7 +66,7 @@ export function validateBuildScript(pkg,script) {
     if(seen.has(name))return;seen.add(name);
     const command=pkg.scripts[name];if(typeof command!=='string')return;
     for(const words of commands(command)) {
-      if(words.some(word=>/^(?:vercel|vc)(?:@[^\s]+)?$/.test(executable(word))))throw new Error('UNSUPPORTED_BUILD: 构建脚本不能调用 Vercel CLI。请使用无需 Vercel 登录或云项目的本地框架适配器生成 Build Output API v3 产物，由 1GP 统一部署。');
+      if(words.some(word=>/^(?:vercel|vc)(?:@[^\s]+)?$/.test(executable(word))))throw new Error('UNSUPPORTED_BUILD: 构建脚本不能调用 Vercel CLI。请使用无需 Vercel 登录或云项目的本地框架适配器生成 Build Output API v3 产物，由 AIWANNA 统一部署。');
       if(words.some(word=>['sh','bash','zsh','dash','cmd','powershell','pwsh','eval'].includes(executable(word)))||['if','for','while','case','function'].includes(words[0]))unsupported();
       if(words.some(word=>executable(word)==='npx')&&words.some(word=>/^(-c|--call|--shell)(=|$)/.test(word)))unsupported();
       for(const nested of nestedScripts(words,pkg))inspect(nested);

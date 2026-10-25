@@ -14,16 +14,26 @@ async function responseData(response) {
     error:typeof data.error==='string'&&data.error?data.error:`平台请求失败 (${response.status})。`,status:response.status};
   return data;
 }
+export const defaultPlatformOrigin='https://www.aiwanna.games';
+// Earlier releases connected through another address of the same platform; a sign-in saved there
+// is the same account authorization, so it keeps working without a new connect_platform.
+const earlierDefaultOrigins=['https://1gp-game-platform.vercel.app'];
+const credentialName=origin=>createHash('sha256').update(origin).digest('hex').slice(0,16)+'.json';
+async function savedToken(file) {
+  try{if((await lstat(file)).isSymbolicLink())throw new Error('Invalid credential file');const data=JSON.parse(await readFile(file,'utf8'));return /^[a-f0-9]{64}$/.test(data.token)?data.token:null;}catch{return null;}
+}
 export class Platform {
-  constructor({origin=process.env.ONEGP_PLATFORM_URL||'https://1gp-game-platform.vercel.app',configDirectory=join(homedir(),'.config','1gp-studio')}={}) {
+  constructor({origin=process.env.ONEGP_PLATFORM_URL||defaultPlatformOrigin,configDirectory=join(homedir(),'.config','1gp-studio')}={}) {
     const url=new URL(origin);
     if(url.username||url.password||url.pathname!=='/'||url.search||url.hash||(url.protocol!=='https:'&&!(url.protocol==='http:'&&['127.0.0.1','localhost'].includes(url.hostname)))) throw new Error('Platform URL must be an HTTPS origin');
     this.origin=url.origin;
     this.directory=configDirectory;
-    this.file=join(configDirectory,createHash('sha256').update(this.origin).digest('hex').slice(0,16)+'.json');
+    this.file=join(configDirectory,credentialName(this.origin));
+    this.earlierFiles=this.origin===defaultPlatformOrigin?earlierDefaultOrigins.map(origin=>join(configDirectory,credentialName(origin))):[];
   }
   async token() {
-    try{if((await lstat(this.file)).isSymbolicLink())throw new Error('Invalid credential file');const data=JSON.parse(await readFile(this.file,'utf8'));return /^[a-f0-9]{64}$/.test(data.token)?data.token:null;}catch{return null;}
+    for(const file of [this.file,...this.earlierFiles]){const token=await savedToken(file);if(token)return token;}
+    return null;
   }
   async request(path,{body,token,method=body?'POST':'GET',timeoutMs=175000,signal,idempotencyKey}={}) {
     const secret=token===undefined?await this.token():token;
@@ -52,7 +62,7 @@ export class Platform {
   }
   async connect() {
     let token=await this.token();
-    if(token){const state=await this.request('/api/connections',{token});if(state.connected)return {connected:true,message:'已连接，可以调用 inspect_game / publish_game。'};if(state.code&&state.code!=='AUTH_REQUIRED')return state;}
+    if(token){const state=await this.request('/api/connections',{token});if(state.connected)return {connected:true,message:'已连接，可以调用 prepare_game 继续发布。'};if(state.code&&state.code!=='AUTH_REQUIRED')return state;}
     token=randomBytes(32).toString('hex');
     await mkdir(this.directory,{recursive:true,mode:0o700});
     if((await lstat(this.directory)).isSymbolicLink())throw new Error('Credential directory must not be a symlink');
@@ -62,6 +72,6 @@ export class Platform {
     await writeFile(temporary,JSON.stringify({token}),{mode:0o600,flag:'wx'});
     const {rename}=await import('node:fs/promises');await rename(temporary,this.file);
     const challenge=createHash('sha256').update(token).digest('hex');
-    return {connected:false,authorizationUrl:`${this.origin}/connect?challenge=${challenge}`,fingerprint:challenge.slice(0,12),message:'请用户本人打开链接，登录并确认授权。完成后调用 publish_game。不要自动替用户批准。'};
+    return {connected:false,authorizationUrl:`${this.origin}/connect?challenge=${challenge}`,fingerprint:challenge.slice(0,12),message:'请用户本人打开链接，登录并确认授权。完成后继续调用 prepare_game。不要自动替用户批准。'};
   }
 }

@@ -15,7 +15,7 @@ const failure = (code, error) => ({ code, error });
 const invalidResponse = () => failure('PLATFORM_ERROR', '平台未返回完整媒体保存结果；请检查物料后用相同文件恢复，不要另换文件重复添加。');
 const accountChanged = () => failure('ACCOUNT_CHANGED', '连接账号已变更；已完成素材留在原账号下，请回到正确账号继续。');
 
-async function snapshot(projectDirectory, target, path) {
+export async function snapshot(projectDirectory, target, path) {
   const file = await readProjectFile(projectDirectory, path, maxSource);
   const type = await fileTypeFromBuffer(file.bytes).catch(() => undefined);
   if (!type || !(target === 'preview' ? Object.hasOwn(previewTypes, type.mime) : imageTypes.has(type.mime))) throw new Error(`${path} 的实际文件类型不支持；封面/截图需 JPG、PNG、WebP，预览需 GIF、WebP、MP4、WebM。`);
@@ -101,7 +101,7 @@ export async function setGameMedia(platform, projectDirectory, gameSlug, { cover
   if (typeof gameSlug !== 'string' || gameSlug.length > 200 || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(gameSlug)
     || fillMissing !== true || !Array.isArray(screenshots) || screenshots.length > 20 || !cover && !preview && !screenshots.length) return failure('INVALID_MEDIA', '请提供真实游戏标识及至少一份素材；截图最多 20 张，主封面和预览只补缺失。');
   const token = await platform.token?.();
-  if (!token) return failure('AUTH_REQUIRED', '请先连接 1GP 账号。');
+  if (!token) return failure('AUTH_REQUIRED', '请先连接 AIWANNA 账号。');
   const unchanged = async () => await currentToken(platform) === token;
   const selected = [...(cover ? [{ target: 'cover', path: cover }] : []), ...screenshots.map(path => ({ target: 'screenshot', path })), ...(preview ? [{ target: 'preview', path: preview }] : [])].map((item, index) => ({ ...item, index }));
   const uploaded = [], skipped = [], files = [], seen = new Set(), completed = new Set();

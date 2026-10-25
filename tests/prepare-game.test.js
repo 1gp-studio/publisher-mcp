@@ -53,7 +53,10 @@ test('preparation finds the game once and includes channel, inspection, language
   assert.equal(result.promotion.independentOfMultilingual, true);
   assert.deepEqual(result.promotion.unknown, ['genre', 'tags', 'mainCover', 'screenshots', 'preview']);
   assert.deepEqual(result.features, choices);
-  assert.deepEqual(result.decisions, ['multilingual', 'cloudSaves', 'leaderboards']);
+  // Optional features are offered after publishing, not asked before it.
+  assert.deepEqual(result.decisions, []);
+  assert.deepEqual(result.optionalFeatures, ['multilingual', 'cloudSaves', 'leaderboards']);
+  assert.equal(result.languageCheck.convention, undefined, 'the language convention waits until the author opts in');
   assert.ok(!JSON.stringify(result).includes(f.state.token));
   assert.deepEqual(await readdir(f.directory), ['game-updates']);
 });
@@ -168,7 +171,7 @@ test('remote errors remain unknown rather than masquerading as disabled integrat
   const result = await prepareGame(f.platform, f.project);
   assert.deepEqual(result.integrations, f.state.integrations);
   assert.deepEqual(result.features, choices);
-  assert.match(result.instructions, /不把未知状态当作未启用/);
+  assert.match(result.instructions, /不把未知当未启用/);
   f.state.networkError = true;
   await assert.rejects(prepareGame(f.platform, f.project), /Network unavailable/);
 });

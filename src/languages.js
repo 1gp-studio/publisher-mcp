@@ -86,7 +86,7 @@ export async function checkGameLanguages(projectDirectory){
 }
 export const convention=[
   '玩家看到的文字都用键名显示（t(\'start\')）；游戏只带一份原始语言的 JSON（{"键名": "文字"}，可用 {0}、{name} 占位）。',
-  '加载平台 SDK：<script src="https://www.ai-made.games/sdk/v1.js"></script>，用 AIWanna.i18n({ game: \'<游戏 slug>\', original, originalLang: \'zh\' }).then(t => …) 取文字；请求失败或缺条目时用 original。',
+  '加载平台 SDK：<script src="https://www.aiwanna.games/sdk/v1.js"></script>，用 AIWanna.i18n({ game: \'<游戏 slug>\', original, originalLang: \'zh\' }).then(t => …) 取文字；请求失败或缺条目时用 original。',
   `默认语言：先读 ?lang=（网站当前提供 ${siteLanguages.join('、')}），没有再看浏览器语言；SDK 的 AIWanna.lang() 已按这个顺序。游戏里可以有语言切换，但打开时必须听 ?lang=；已有其他语言的读取和切换保留。`,
   '字体：中日韩要有能显示这些字的字体，别只用拉丁像素字体；已有其他语言也保留所需字体。按钮和固定宽度的地方给变长的文字留余量。',
   `翻译：默认按 ${siteLanguages.join('、')} 的顺序补齐缺失或过期的目标语言条目，跳过原始语言；原始语言不在这五种中时保留原文并补齐这五种目标。保留已有其他语言，不要求新增它们。按游戏的语气翻，按钮短而清楚，占位符原样保留，专有名词不硬译。每种语言一个 JSON，键名和原始语言文件完全一致。`,

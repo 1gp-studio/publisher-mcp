@@ -11,7 +11,7 @@ import { validateVercelOutputFile,VERCEL_OUTPUT_LIMITS } from './vercel-validati
 const managedDirectory='.1gp/vercel-output';
 const fail=message=>{throw new Error('UNSUPPORTED_BUILD: '+message);};
 const object=(value,label)=>{if(!value||typeof value!=='object'||Array.isArray(value))fail(`${label} 必须是对象。`);return value;};
-const onlyKeys=(value,keys,label)=>{for(const key of Object.keys(value))if(!keys.includes(key))fail(`${label} 的 ${key} 尚不能由本地适配器转换；请使用完整预构建产物或 1GP Docker，不会忽略此配置。`);};
+const onlyKeys=(value,keys,label)=>{for(const key of Object.keys(value))if(!keys.includes(key))fail(`${label} 的 ${key} 尚不能由本地适配器转换；请使用完整预构建产物或 AIWANNA Docker，不会忽略此配置。`);};
 const escape=value=>value.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
 
 async function configuration(root) {
@@ -122,7 +122,7 @@ async function bundleFunction(root,entry,directory,settings) {
         buildApi.onLoad({filter:/.*/,namespace:'ws-optional'},()=>({contents:`module.exports = (() => { const error = new Error('Optional ws native accelerator is not included'); error.code = 'MODULE_NOT_FOUND'; throw error; })();`,loader:'js'}));
       }
     }]});
-  }catch {throw new Error(`LOCAL_BUILD_FAILED: 无法将 ${entry.file} 打包为自包含 Node.js 函数。请确认已安装依赖；动态 require、原生模块或未打包的运行资源需要项目专用适配器/1GP Docker。没有发布游戏。`);}
+  }catch {throw new Error(`LOCAL_BUILD_FAILED: 无法将 ${entry.file} 打包为自包含 Node.js 函数。请确认已安装依赖；动态 require、原生模块或未打包的运行资源需要项目专用适配器/AIWANNA Docker。没有发布游戏。`);}
   const builtins=new Set(builtinModules.flatMap(name=>[name,'node:'+name]));
   for(const output of Object.values(result.metafile.outputs))for(const item of output.imports)if(item.external&&!builtins.has(item.path))fail(`函数 ${entry.file} 仍依赖未打包模块；请生成自包含产物。`);
   // esbuild records the entire resolved dependency graph, including packages and re-exports.
@@ -133,7 +133,7 @@ async function bundleFunction(root,entry,directory,settings) {
   const untracedRuntime=new Set(['fs','fs/promises','module','child_process','worker_threads','vm']);
   for(const [input,metadata] of Object.entries(result.metafile.inputs)) {
     const unsupported=metadata.imports.find(item=>item.external&&untracedRuntime.has(item.path.replace(/^node:/,'')));
-    if(unsupported)fail(`函数 ${entry.file} 的依赖 ${input.split('\\').join('/')} 使用 ${unsupported.path}，可能在运行时读取文件或加载未打包代码，无法确认产物完整。请把数据改成 import 引入（例如 import levels from './levels.json'），或使用项目专用适配器 / 1GP Docker。`);
+    if(unsupported)fail(`函数 ${entry.file} 的依赖 ${input.split('\\').join('/')} 使用 ${unsupported.path}，可能在运行时读取文件或加载未打包代码，无法确认产物完整。请把数据改成 import 引入（例如 import levels from './levels.json'），或使用项目专用适配器 / AIWANNA Docker。`);
   }
   // Do not execute the game during compilation or substitute process.env.
   // This wrapper preserves both Node req/res handlers and exported http.Server.
@@ -182,6 +182,6 @@ export async function buildVercelGame(projectDirectory,{frontendOutputDirectory,
     if(old)await rename(managed,join(temp,'previous-output'));
     try{await rename(output,managed);await writeFile(marker,JSON.stringify({tool:'1gp-publisher-mcp',version:1,projectId:owner}),{mode:0o600});}
     catch(error){if(old){await rm(managed,{recursive:true,force:true});await rename(join(temp,'previous-output'),managed);}throw error;}
-    return {ready:true,buildMethod:'vercel-output',project_directory:root,deployment_target:'vercel',vercel_output_directory:managedDirectory,functionCount:entries.length,fileCount:bundle.files.length,artifactBytes:bundle.size,uploadFiles:bundle.files.map(file=>file.file),message:'已在本地构建前端与 API 函数，未上传或部署。接下来 prepare_release 后，用返回的 project_directory、deployment_target、vercel_output_directory 调用 publish_game，由 1GP 统一托管，无需 Vercel 登录。'};
+    return {ready:true,buildMethod:'vercel-output',project_directory:root,deployment_target:'vercel',vercel_output_directory:managedDirectory,functionCount:entries.length,fileCount:bundle.files.length,artifactBytes:bundle.size,uploadFiles:bundle.files.map(file=>file.file),message:'已在本地构建前端与 API 函数，未上传或部署。接下来 prepare_release 后，用返回的 project_directory、deployment_target、vercel_output_directory 调用 publish_game，由 AIWANNA 统一托管，无需 Vercel 登录。'};
   }finally{if(temp)await rm(temp,{recursive:true,force:true});await lock.close();await rm(lockPath,{force:true});}
 }

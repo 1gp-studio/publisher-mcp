@@ -28,7 +28,7 @@ function object(value         , label        )             {
 
 function keys(value            , allowed                   , label        ) {
   for (const key of Object.keys(value)) {
-    if (!allowed.includes(key)) fail(`${label} 不支持字段 ${key}；请生成仅含静态资源、同源路由和自包含 Node.js 22/24 函数的产物，或使用 1GP Docker 渠道。`);
+    if (!allowed.includes(key)) fail(`${label} 不支持字段 ${key}；请生成仅含静态资源、同源路由和自包含 Node.js 22/24 函数的产物，或使用 AIWANNA Docker 渠道。`);
   }
 }
 
@@ -69,7 +69,7 @@ function locateFile(path        )               {
     const local = path.slice(FUNCTIONS.length).split('/');
     const index = local.findIndex(part => part.endsWith('.func'));
     if (index < 0 || index === local.length - 1 || local.slice(index + 1).some(part => part.endsWith('.func'))) {
-      fail('functions 只支持自包含的 <名称>.func/ 目录；prerender、Edge、services 和 daemons 尚未接入，请使用受支持的 Node.js 函数或 1GP Docker 渠道。');
+      fail('functions 只支持自包含的 <名称>.func/ 目录；prerender、Edge、services 和 daemons 尚未接入，请使用受支持的 Node.js 函数或 AIWANNA Docker 渠道。');
     }
     const functionName = local.slice(0, index + 1).join('/').slice(0, -5);
     if (!functionName || local.slice(0, index + 1).some(part => part.startsWith('.'))) fail('函数名称无效。');
@@ -78,7 +78,7 @@ function locateFile(path        )               {
     const functionRoot = `${FUNCTIONS}${local.slice(0, index + 1).join('/')}/`;
     return { kind: 'function', functionName, functionRoot, config: tail.length === 1 && tail[0] === '.vc-config.json' };
   }
-  fail('只上传 .vercel/output/config.json、static/ 和 functions/；请移除构建日志、缓存和其他输出，或改用 1GP Docker 渠道。');
+  fail('只上传 .vercel/output/config.json、static/ 和 functions/；请移除构建日志、缓存和其他输出，或改用 AIWANNA Docker 渠道。');
 }
 
 function parseConfig(bytes        , label        )             {
@@ -120,7 +120,7 @@ function validateFunctionConfig(config            )         {
   // An empty value is the official builder's default Node invocation contract.
   if ('awsLambdaHandler' in config && config.awsLambdaHandler !== '') fail('函数 awsLambdaHandler 只支持空字符串；请使用标准 Node.js 或 Web API 函数入口。');
   if (config.filePathMap !== undefined && Object.keys(object(config.filePathMap, 'filePathMap')).length) fail('函数 filePathMap 引用了产物外文件；请生成自包含产物（例如使用构建器的 standalone 模式），不要仅上传部分文件。');
-  if (!['nodejs22.x', 'nodejs24.x'].includes(String(config.runtime))) fail('1GP 完整产物目前支持 Node.js 22/24 函数；Edge、其他运行时和常驻服务请使用受支持构建方式或 1GP Docker 渠道。');
+  if (!['nodejs22.x', 'nodejs24.x'].includes(String(config.runtime))) fail('AIWANNA 完整产物目前支持 Node.js 22/24 函数；Edge、其他运行时和常驻服务请使用受支持构建方式或 AIWANNA Docker 渠道。');
   keys(config, ['runtime', 'handler', 'launcherType', 'memory', 'maxDuration', 'regions', 'architecture', 'shouldAddHelpers', 'shouldAddSourcemapSupport', 'supportsResponseStreaming', 'supportsMultiPayloads', 'filePathMap', 'environment', 'awsLambdaHandler', 'useWebApi'], '函数配置');
   if (config.launcherType !== 'Nodejs') fail('Node.js 函数配置需要 launcherType: "Nodejs"。');
   const handler = relativePath(config.handler, '函数 handler');

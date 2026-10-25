@@ -5,7 +5,7 @@ import { readFile, lstat, realpath } from 'node:fs/promises';
 import { isAbsolute, join, resolve } from 'node:path';
 const exec = promisify(execFile);
 
-// What identifies the current project on 1GP: its GitHub repositories, where it may be played
+// What identifies the current project on AIWANNA: its GitHub repositories, where it may be played
 // (GitHub Pages from those repositories, package.json homepage, a CNAME file) and its local-upload id.
 async function small(path) { try { const stat = await lstat(path); return stat.isFile() && stat.size < 100000 ? await readFile(path, 'utf8') : null; } catch { return null; } }
 export async function projectSignals(projectDirectory) {

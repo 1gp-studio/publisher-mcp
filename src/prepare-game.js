@@ -1,4 +1,3 @@
-import { updateApprovalGuidance, updateHistoryGuidance } from './update-approval-guidance.js';
 import { createHash, randomBytes } from 'node:crypto';
 import { constants } from 'node:fs';
 import { lstat, mkdir, open, realpath, rename, writeFile, rm } from 'node:fs/promises';
@@ -111,11 +110,23 @@ export async function prepareGame(platform, projectDirectory, options = {}) {
     languageCheck.nextSteps = ['已有自动文字来源配置，沿用 textSources 中的模式和文件，不重复询问或重新配置。配置和词表就绪不等于 SDK/Godot 显示接入已验证；核对 integration、待审条目与实际游戏。', ...languageCheck.nextSteps.slice(1)];
   } else if (requested.multilingual === true && !languageCheck.multilingual) {
     languageCheck.nextSteps = ['作者已选择接入多语言，按 convention 改造并验证，无需再次询问。', ...languageCheck.nextSteps.slice(1)];
+  } else if (!languageCheck.multilingual) {
+    // Not asked before publishing; the integration convention is fetched only once the author opts in.
+    languageCheck.nextSteps = ['还没做多语言。发布前不追问，发布后作为可选功能提醒；作者要做时再调用 check_game_languages 取得接入约定。'];
+    delete languageCheck.convention;
   }
   return { project_directory: root, ...release, inspection, languageCheck, integrations, materials, textSources, promotion, publisherVersion: packageInfo.version, features: requested,
     ...(update?.error ? { updateWarning: update } : update ? { updateId: update.id, update } : {}),
     ...(preferenceWarning ? { preferenceWarning } : {}),
-    decisions: featureNames.filter(name => requested[name] === null && (name !== 'announcement' || release.channel === 'new')),
-    instructions: `${release.instructions}\n先执行 promotion 的分类、主语言标签、主封面、真实截图和短实机预览五项清单；它独立于多语言选择。依据代码和实玩证据用 set_game_details 只补缺失 genre/tags，用 set_game_media 上传已核对的主封面、截图和预览；复用现有素材，已有作者截图不足 3 张时建议补到 3–5 张；仅有精选截图时直接复用，因为新增作者图会替换整组精选展示，不为凑数自动上传。保留作者关闭预览。MCP 不自带截图、图像或视频生成，缺少宿主工具时如实列出阻碍。平台物料状态未知先恢复读取；上传成功或部署 ready 都不能代替实际视觉/播放验证。\n准备已包含游戏识别、发布渠道、项目检查和语言检查，不必再单独 find_my_game、prepare_release 或 check_game_languages；仅源码/配置变化后重查相关项。只集中询问尚未决定且本次相关的功能，已有会话授权和已保存选择直接沿用。features 是作者意向，不代表已接入；false 不会关闭已有功能。云存档/排行榜默认不改，只有作者选择时才用配置工具和专属接入说明修改游戏。配置接口失败时先解决，不把未知状态当作未启用。textSources 只读展示 keys/phrases 自动同步配置；读取失败（含旧服务器不支持）表示不可用，不表示关闭。已有设置直接沿用；新增设置需作者已选择多语言。configure_game_text_source 只登记文件并有限扫描，不构建、不发布，也不代表游戏显示接入已完成；待审候选须逐项核对后按 source_fingerprint 批准。materials 包含已有物料，读取失败时先解决，不能把未知状态当作空白。多语言需包含游戏文字、名字、简介和同一底图叠加译名的自动封面；保留已有作者设置。首次发布可集中询问 announcement；它只记住发帖意向，发布具体内容还需作者批准，可与物料和发布方案一次确认。更新不自动发首发宣传帖，宣传失败不得重发游戏。尽量先完成全部选定功能再做一次最终发布。新游戏必须先发布以获得真实 ID 时，必要的中间部署与随后接入功能后的部署沿用本次 updateId，不得编造 ID 或宣称已接通。重查或记住 features 时传同一 update_id；所有渠道发布均带 release.updateId。仅修改平台语言文件、名称、简介、封面或配置，不因物料改动重新发布。中间部署不发社区日志。${updateApprovalGuidance.zh}${updateHistoryGuidance.zh}首发组跳过更新日志。收尾失败只重试同一更新，不重发游戏。发布成功返回 build ID 后用 wait_for_publish 继续原任务；结果不明不得重复发布。`,
+    // Only the launch post is asked before publishing; the rest is offered once the game is live.
+    decisions: requested.announcement === null && release.channel === 'new' ? ['announcement'] : [],
+    optionalFeatures: [...['multilingual', 'cloudSaves', 'leaderboards'].filter(name => requested[name] !== true),
+      ...['screenshots', 'preview'].filter(key => ['prepare_needed', 'local_candidate'].includes(promotion.items[key]?.state))],
+    instructions: `${release.instructions}
+准备结果已包含游戏识别、发布渠道、项目检查和语言检查，不必再单独 find_my_game、prepare_release 或 check_game_languages；源码或配置改变后只重查相关项。
+首发只需要 promotion.required 里的分类、主语言标签和主封面：依据代码和实玩证据用 set_game_details 只补缺失 genre/tags，用 set_game_media 上传核对过的主封面；截图和预览可以上线后再补，有现成素材或工具时顺手上传。复用已有素材，保留作者关闭预览；MCP 不自带截图、图像或视频生成，缺少宿主工具时如实说明。平台物料状态未知先恢复读取，上传成功或部署 ready 都不能代替实际查看。
+发布前只问 decisions 里的事：首次发布时问一次要不要顺手发首发社区帖（announcement 只记意向，帖子内容另需作者认可，可与物料一起确认）。多语言、云存档、排行榜不在发布前追问；已开启的照常沿用，作者主动要求时才接入。features 是作者意向，不代表已接入；false 不会关闭已有功能。发布完成后按 optionalFeatures 简短提醒作者还有哪些可选功能没用上，说明可以帮忙接入或补齐，由作者决定。
+云存档/排行榜只在作者选择后用配置工具和专属接入说明修改游戏；配置接口失败先解决，不把未知当未启用。textSources 只读展示自动文字同步配置，读取失败表示不可用，不表示关闭；configure_game_text_source 只登记文件并有限扫描，不构建、不发布；待审候选逐项核对后按 source_fingerprint 批准。多语言包括游戏文字、名字、简介和同一底图叠加译名的自动封面，保留作者已有设置。
+新游戏必须先发布以获得真实 ID 时，之后接入功能的部署沿用本次 updateId，不编造 ID 或宣称已接通。重查或记住 features 时传同一 update_id；所有渠道发布都带 release.updateId。只改平台语言文件、名称、简介、封面或配置时不重新发布。中间部署不发社区日志，首发组不生成更新日志；版本公告按上文规则先经作者认可。更新不自动发首发宣传帖；宣传或收尾失败只重试同一项，不重发游戏。发布返回 build ID 后用 wait_for_publish 继续；结果不明不重复发布。`,
   };
 }

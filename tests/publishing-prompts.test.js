@@ -26,7 +26,8 @@ test('normal publishing fills store metadata and real media even when multilingu
   assert.match(prompt,/不强制接管游戏时钟、不改玩法、不碰玩家存档/);
   assert.match(prompt,/不用生成图片冒充游戏截图/);
   assert.match(prompt,/保留已有主封面和预览，截图只追加/);
-  assert.match(prompt,/无法截图或录制时明确列为受阻/);
+  assert.match(prompt,/首发必须有分类、标签和主封面/);
+  assert.match(prompt,/截图或预览没做时说明原因/);
   assert.match(prompt,/纯物料修改不部署、不发版本帖/);
  }
 });
@@ -95,7 +96,7 @@ test('author documentation describes confirmation and safe removal without autom
 test('package, lock and active install examples agree without rewriting historical changelog entries',async()=>{
  const lock=JSON.parse(await readFile(new URL('../package-lock.json',import.meta.url),'utf8'));
  const readme=await readFile(new URL('../README.md',import.meta.url),'utf8');
- assert.equal(packageInfo.version,'0.11.0');assert.equal(lock.version,packageInfo.version);assert.equal(lock.packages[''].version,packageInfo.version);
- const install=readme.split('## 使用')[0];assert.ok(install.includes('#v0.11.0'));assert.ok(!install.includes('#v0.10.0'));assert.ok(!install.includes('#v0.9.0'));assert.doesNotMatch(readme,/本地包，尚未公开发布|当前仅准备本地安装包/);
- for(const heading of ['## v0.11.0','## v0.10.0','## v0.9.0','## v0.8.0','## v0.7.4','## v0.6.2'])assert.ok(readme.includes(heading));
+ assert.equal(packageInfo.version,'0.12.0');assert.equal(lock.version,packageInfo.version);assert.equal(lock.packages[''].version,packageInfo.version);
+ const install=readme.split('## 使用')[0];assert.ok(install.includes('#v0.12.0'));assert.ok(!install.includes('#v0.11.0'));assert.ok(!install.includes('#v0.10.0'));assert.ok(!install.includes('#v0.9.0'));assert.doesNotMatch(readme,/本地包，尚未公开发布|当前仅准备本地安装包/);
+ for(const heading of ['## v0.12.0','## v0.11.0','## v0.10.0','## v0.9.0','## v0.8.0','## v0.7.4','## v0.6.2'])assert.ok(readme.includes(heading));
 });

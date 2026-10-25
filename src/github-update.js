@@ -18,7 +18,7 @@ export function updateRoute(context) {
       '改了游戏代码时：请作者先在自己的托管处更新游戏，再用 publish_link（同一网址）附上 release 版本说明，更新游戏页信息。',
     ] };
     case 'docker': return { channel: 'docker', nextSteps: [
-      `这个游戏用 1GP Docker 发布（project: ${context.dockerProject ?? ''}）：沿用 build_docker_image → upload_docker_image → get_docker_upload_status → publish_docker_game，project 保持不变。`,
+      `这个游戏用 AIWANNA Docker 发布（project: ${context.dockerProject ?? ''}）：沿用 build_docker_image → upload_docker_image → get_docker_upload_status → publish_docker_game，project 保持不变。`,
     ] };
     case 'local': return { channel: 'local', nextSteps: ['这个游戏从本地上传：复用 prepare_game 的 inspection（没有时才 inspect_game），需要时 build_vercel_game，再 publish_game；带上 gameSlug、release 和已有产物参数，不重复构建。'] };
     default: return { channel: 'new', nextSteps: ['还没有发布过：复用 prepare_game 的 inspection 选择合适的发布方式；没有检查结果时才调用 inspect_game。'] };

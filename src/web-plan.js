@@ -100,7 +100,7 @@ export async function serverRequirements(root,pkg) {
   }
   return [...new Set(reasons)];
 }
-export const fullGameGuidance='存在 API、服务端或 SSR 时不能只发布前端。普通 Vite/npm 静态前端 + api/*.js/ts 可先调用 build_vercel_game，在本地直接生成完整产物，无需 Vercel 登录。其他框架请用其本地适配器/构建脚本生成 Vercel Build Output API v3（.vercel/output/config.json、static/、functions/，含各 .func/.vc-config.json 和运行依赖），再使用 deployment_target="vercel"、vercel_output_directory=".vercel/output"；如需构建，提供已有 npm build_script。只需 1GP 授权，不要登录 Vercel、创建个人云项目或直接部署。需要常驻进程/WebSocket 或服务器内存房间的游戏应使用 1GP Docker 托管。';
+export const fullGameGuidance='存在 API、服务端或 SSR 时不能只发布前端。普通 Vite/npm 静态前端 + api/*.js/ts 可先调用 build_vercel_game，在本地直接生成完整产物，无需 Vercel 登录。其他框架请用其本地适配器/构建脚本生成 Vercel Build Output API v3（.vercel/output/config.json、static/、functions/，含各 .func/.vc-config.json 和运行依赖），再使用 deployment_target="vercel"、vercel_output_directory=".vercel/output"；如需构建，提供已有 npm build_script。只需 AIWANNA 授权，不要登录 Vercel、创建个人云项目或直接部署。需要常驻进程/WebSocket 或服务器内存房间的游戏应使用 AIWANNA Docker 托管。';
 // A caller can select an artifact folder, never escape through .. or symlinks.
 export async function outputPath(root,directory,{building=false}={}) {
   if(typeof directory!=='string'||!directory||isAbsolute(directory)||/[\\:\0]/.test(directory)||directory.split('/').includes('..'))throw new Error('UNSUPPORTED_BUILD: output_directory 必须是项目内的相对目录。');

@@ -132,8 +132,11 @@ test('mixed-genre tags remain valid candidates while a saved primary category ke
   assert.deepEqual(newGame.localKit.issues, []);
   assert.equal(newGame.items.genre.candidate, 'action');
   assert.deepEqual(newGame.items.tags.candidate, ['放置', 'RPG']);
-  assert.match(newGame.items.tags.nextStep, /只避开与当前主分类重复/);
-  assert.match(newGame.items.genre.nextStep, /不因为简单易上手就归休闲/);
+  assert.match(newGame.items.tags.nextStep, /classification/);
+  assert.match(newGame.classification, /只避开与当前主分类重复/);
+  assert.match(newGame.classification, /不因为简单易上手就归休闲/);
+  assert.deepEqual(newGame.required, ['genre', 'tags', 'mainCover']);
+  assert.equal(newGame.items.screenshots.optional, true); assert.equal(newGame.items.mainCover.optional, false);
 
   materials.labels = { genre: 'idle', genreSource: 'creator', tags: ['RPG'] };
   const saved = await preparePromotion(f.root, existing(materials));

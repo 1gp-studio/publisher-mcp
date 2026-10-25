@@ -3,7 +3,7 @@ import { testSymlink } from './helpers/symlink.js';
 import assert from 'node:assert/strict';
 import { mkdtemp,writeFile,rm,stat,mkdir,readdir,symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join,resolve } from 'node:path';
+import { basename,join,resolve } from 'node:path';
 import { createHash } from 'node:crypto';
 import { createServer } from 'node:http';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -93,6 +93,21 @@ test('pairing exposes only a hash, stores private token, and authenticates API r
   const result=await platform.connect();const token=await platform.token();
   assert.ok(token);assert.equal(JSON.stringify(result).includes(token),false);assert.equal(new URL(result.authorizationUrl).searchParams.get('challenge'),createHash('sha256').update(token).digest('hex'));if(process.platform!=='win32')assert.equal((await stat(platform.file)).mode&0o777,0o600);
   assert.equal((await platform.connect()).connected,true);assert.equal(seen,`Bearer ${token}`);
+});
+test('a saved sign-in from the earlier default address keeps working on the main domain',async t=>{
+  const dir=await fixture(t,{}),old=new Platform({origin:'https://1gp-game-platform.vercel.app',configDirectory:dir});
+  await writeFile(old.file,JSON.stringify({token:'b'.repeat(64)}));
+  const platform=new Platform({configDirectory:dir});
+  assert.equal(platform.origin,'https://www.aiwanna.games');assert.equal(await platform.token(),'b'.repeat(64));
+  assert.equal(await new Platform({origin:'http://127.0.0.1:9',configDirectory:dir}).token(),null,'never sent to another platform');
+  await writeFile(platform.file,JSON.stringify({token:'c'.repeat(64)}));assert.equal(await platform.token(),'c'.repeat(64),'a new sign-in wins');
+});
+test('game titles come from the page title before template and folder names',async t=>{
+  const page=title=>`<!doctype html><title>${title}</title><body></body>`;
+  assert.equal((await inspectGame(await fixture(t,{'index.html':page('点点 &amp; 星星')}))).title,'点点 & 星星');
+  assert.equal((await inspectGame(await fixture(t,{'index.html':page('Vite + TS'),'package.json':JSON.stringify({name:'star-catcher'})}))).title,'star-catcher');
+  const plain=await fixture(t,{'index.html':'<canvas></canvas>','package.json':JSON.stringify({name:'vite-project'})});
+  assert.equal((await inspectGame(plain)).title,basename(plain),'the folder name over a template name');
 });
 test('Godot metadata is read from project.godot as plain data',async t=>{
   const dir=await fixture(t,{'project.godot':'[application]\nconfig/name="Ink \\"Blade\\""\nconfig/description="Hero defense"\n'});

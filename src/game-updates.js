@@ -1,5 +1,6 @@
 import { createHash, randomUUID, randomBytes } from 'node:crypto';
 import { isPlatformOrigin } from './platform-origins.js';
+import { uploadPostImage } from './post-images.js';
 import { constants } from 'node:fs';
 import { lstat, mkdir, open, realpath, rename, unlink } from 'node:fs/promises';
 import { isAbsolute, join, parse, resolve, sep } from 'node:path';
@@ -73,7 +74,7 @@ const publicUpdate = value => ({ id: value.id, gameSlug: value.gameSlug, registe
 /** Local intent only. Registration happens immediately before the first real publication. */
 export async function prepareGameUpdate(platform, projectDirectory, { gameSlug, updateId, newUpdate = false, token } = {}) {
   token ??= await platform.token?.();
-  if (!token) return failure('AUTH_REQUIRED', '请先连接 1GP 账号。');
+  if (!token) return failure('AUTH_REQUIRED', '请先连接 AIWANNA 账号。');
   if (updateId !== undefined && !uuid(updateId) || newUpdate && updateId) return failure('INVALID_UPDATE', 'update_id 与 new_update 不能同时传入。');
   try {
     const store = await scope(platform, token, projectDirectory);
@@ -98,7 +99,7 @@ export async function prepareGameUpdate(platform, projectDirectory, { gameSlug, 
 export async function publishGameUpdate(platform, { projectDirectory, gameSlug, updateId }, submit) {
   if (!uuid(updateId)) return failure('UPDATE_REQUIRED', '先 prepare_game，然后在所有发布的 release.updateId 中沿用返回的 update.id。');
   const token = await platform.token?.();
-  if (!token) return failure('AUTH_REQUIRED', '请先连接 1GP 账号。');
+  if (!token) return failure('AUTH_REQUIRED', '请先连接 AIWANNA 账号。');
   let store, value;
   try {
     store = await scope(platform, token, projectDirectory);
@@ -136,20 +137,29 @@ export async function publishGameUpdate(platform, { projectDirectory, gameSlug, 
 }
 
 /** Finalize once; losing the response or deleting the post must never cause another deployment. */
-export async function completeGameUpdate(platform, projectDirectory, { updateId, title, notes, approved }) {
+export async function completeGameUpdate(platform, projectDirectory, { updateId, title, notes, approved, image }) {
   if (!uuid(updateId) || typeof title !== 'string' || !title.trim() || title.trim().length > 120 || typeof notes !== 'string' || !notes.trim() || notes.trim().length > 4000) return failure('INVALID_UPDATE', '需要真实 update_id 和最终合并的标题、说明。');
-  if (approved !== true) return failure('APPROVAL_REQUIRED', '请先把这份最终版本标题和说明给作者确认；明确批准相同内容后才发布更新公告。部署授权不等于公告授权。', { draft: { title: title.trim(), notes: notes.trim() } });
+  if (approved !== true) return failure('APPROVAL_REQUIRED', `请先把这份最终版本标题和说明${image === undefined ? '' : '，以及随帖附上的图片'}给作者确认；明确批准相同内容后才发布更新公告。部署授权不等于公告授权。`,
+    { draft: { title: title.trim(), notes: notes.trim(), ...(image === undefined ? {} : { image }) } });
   const token = await platform.token?.();
-  if (!token) return failure('AUTH_REQUIRED', '请先连接 1GP 账号。');
+  if (!token) return failure('AUTH_REQUIRED', '请先连接 AIWANNA 账号。');
   let store, value;
   try { store = await scope(platform, token, projectDirectory); value = await read(store); }
   catch { return storageError(); }
   // An explicit completed id can still be retried after its active record was cleared.
   if (value && value.id !== updateId) return failure('UPDATE_MISMATCH', '本项目当前记录属于另一个更新，请核对 update_id。');
   if (await currentToken(platform) !== token) return changed();
+  // The picture is uploaded for this update first; the same file always gives the same reference,
+  // so a retry with the same image matches the completed post.
+  let picture;
+  if (image !== undefined) {
+    const uploaded = await uploadPostImage(platform, projectDirectory, image, `update:${updateId}`, token);
+    if (uploaded.error) return uploaded;
+    picture = uploaded.image;
+  }
   let data;
-  try { data = await platform.request(`/api/developer/game-updates/${updateId}/complete`, { method: 'POST', token, body: { title: title.trim(), notes: notes.trim(), approved: true } }); }
-  catch { return failure('UPDATE_STATUS_UNKNOWN', '收尾结果不明；仅用相同 update_id、title 和 notes 重试 complete_game_update，不要重发游戏。', { updateId }); }
+  try { data = await platform.request(`/api/developer/game-updates/${updateId}/complete`, { method: 'POST', token, body: { title: title.trim(), notes: notes.trim(), approved: true, ...(picture ? { image: picture } : {}) } }); }
+  catch { return failure('UPDATE_STATUS_UNKNOWN', '收尾结果不明；仅用相同 update_id、title、notes 和 image 重试 complete_game_update，不要重发游戏。', { updateId }); }
   if (data?.error) return data;
   const validPost = data?.post && uuid(data.post.id) && typeof data.post.url === 'string' && (() => { try {
     const url = new URL(data.post.url);
@@ -186,7 +196,7 @@ const historyAccountChanged = () => failure('ACCOUNT_CHANGED', '连接账号已�
 export async function getGameUpdates(platform, gameSlug, { cursor } = {}) {
   if (!slug(gameSlug) || cursor !== undefined && !validCursor(cursor)) return failure('INVALID_REQUEST', '请提供有效游戏标识，以及上次查询返回的原始 nextCursor。');
   const token = await platform.token?.();
-  if (!token) return failure('AUTH_REQUIRED', '请先连接 1GP 账号。');
+  if (!token) return failure('AUTH_REQUIRED', '请先连接 AIWANNA 账号。');
   if (await currentToken(platform) !== token) return historyAccountChanged();
   const params = new URLSearchParams({ gameSlug, ...(cursor === undefined ? {} : { cursor }) });
   let data;
@@ -208,7 +218,7 @@ export async function deleteGameUpdate(platform, gameSlug, { reference, approved
   if (approved !== true) return failure('APPROVAL_REQUIRED', '只删除作者明确指定的更新记录；已有相同删除指令可直接沿用。');
   if (!slug(gameSlug) || !validReference(reference)) return failure('INVALID_REQUEST', '请使用 get_game_updates 返回的游戏和原始 reference，不要猜测编号。');
   const token = await platform.token?.();
-  if (!token) return failure('AUTH_REQUIRED', '请先连接 1GP 账号。');
+  if (!token) return failure('AUTH_REQUIRED', '请先连接 AIWANNA 账号。');
   if (await currentToken(platform) !== token) return historyAccountChanged();
   let data;
   try { data = await platform.request('/api/developer/game-updates', { method: 'DELETE', token, body: { gameSlug, reference, approved: true } }); }

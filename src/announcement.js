@@ -1,4 +1,5 @@
 import { isPlatformOrigin } from './platform-origins.js';
+import { uploadPostImage } from './post-images.js';
 const pathFor = slug => {
   if (typeof slug !== 'string' || slug.length > 200 || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug)) throw new Error('Invalid game slug');
   return `/api/developer/game-announcement/${encodeURIComponent(slug)}`;
@@ -28,9 +29,20 @@ export async function getGameAnnouncement(platform, slug) {
   return result;
 }
 
-export async function publishGameAnnouncement(platform, slug, input) {
-  if (input?.approved !== true) throw new Error('Only publish the exact announcement content explicitly approved by the author.');
-  const result = await platform.request(pathFor(slug), { method: 'POST', body: input });
+// `image` (optional) is a picture in projectDirectory the author approved with the text; it is
+// uploaded for this launch post first and sent with it.
+export async function publishGameAnnouncement(platform, slug, { image, projectDirectory, ...input } = {}) {
+  if (input.approved !== true) throw new Error('Only publish the exact announcement content explicitly approved by the author.');
+  const path = pathFor(slug);
+  let body = input, token;
+  if (image !== undefined) {
+    token = await platform.token?.();
+    if (!token) return { code: 'AUTH_REQUIRED', error: '请先运行 connect_platform，并由用户在浏览器确认授权。' };
+    const uploaded = await uploadPostImage(platform, projectDirectory, image, `launch:${slug}`, token);
+    if (uploaded.error) return uploaded;
+    body = { ...input, image: uploaded.image };
+  }
+  const result = await platform.request(path, { method: 'POST', body, ...(token ? { token } : {}) });
   if (!record(result)) return invalid();
   if (result.error) return result;
   return uuid(result.id) && publicUrl(result.url, platform) && result.status === 'published' && typeof result.created === 'boolean' ? result : invalid();

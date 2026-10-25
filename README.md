@@ -1,12 +1,12 @@
-# 1GP Publisher MCP
+# AIWANNA Publisher MCP
 
-在 Codex、Claude Code 等支持 MCP 的客户端里检查并发布当前游戏到 AIWANNA（https://www.ai-made.games，新域名 aiwanna.games 上线后自动沿用）。每个用户使用自己的平台账号，一次浏览器授权后即可发布。网页与受支持的服务端函数均由 1GP 统一托管，不需要用户登录 Vercel、提供 Vercel/Supabase Token、选择个人团队或新建个人云项目。
+在 Codex、Claude Code 等支持 MCP 的客户端里检查并发布当前游戏到 AIWANNA（https://www.aiwanna.games）。每个用户使用自己的平台账号，一次浏览器授权后即可发布。网页与受支持的服务端函数均由 AIWANNA 统一托管，不需要用户登录 Vercel、提供 Vercel/Supabase Token、选择个人团队或新建个人云项目。
 
 ## 安装
 
-需要 Node.js 24+、npm（首次从 GitHub 安装 MCP 时需要 Git）。游戏本身不需要 Git 仓库。这是标准的 stdio MCP 服务，任何 MCP 客户端都能使用。
+需要 Node.js 24+、npm 和 Git，并且能访问 GitHub：首次安装由 npx 从 GitHub 下载本项目。游戏本身不需要 Git 仓库。这是标准的 stdio MCP 服务，任何 MCP 客户端都能使用。
 
-**只装一次，装在用户级。** 一份安装对你所有的游戏项目都有效，不要在每个游戏项目里各装一份，也不要在游戏目录里新建 `.mcp.json`。固定版本不会自行升级：先读取实际 MCP 握手 `serverInfo.version`，或调用 `get_publisher_info`；本流程需要 **0.11.0 或更高兼容版本**。低版本只更新当前客户端已有 1GP 配置里的固定版本，保留其他参数、环境配置和授权凭证；更高兼容版本不降级。
+**只装一次，装在用户级。** 一份安装对你所有的游戏项目都有效，不要在每个游戏项目里各装一份，也不要在游戏目录里新建 `.mcp.json`。固定版本不会自行升级：先读取实际 MCP 握手 `serverInfo.version`，或调用 `get_publisher_info`；本流程需要 **0.11.0 或更高兼容版本**。低版本只更新当前客户端已有 AIWANNA 配置里的固定版本，保留其他参数、环境配置和授权凭证；更高兼容版本不降级。
 
 更新后重新加载 MCP，再核对实际运行版本和工具；客户端无法重载时才请用户重启。配置已经写成新版、工具名称已经存在，都不能证明旧进程已经升级。读不到版本时说明情况，不假定已经完成。
 
@@ -19,7 +19,7 @@
 ```toml
 [mcp_servers.onegp]
 command = "npx"
-args = ["--yes", "github:1gp-studio/publisher-mcp#v0.11.0"]
+args = ["--yes", "github:1gp-studio/publisher-mcp#v0.12.0"]
 startup_timeout_sec = 60
 tool_timeout_sec = 600
 ```
@@ -33,10 +33,10 @@ tool_timeout_sec = 600
 在终端运行一次（`--scope user` 对你本人的所有项目生效）：
 
 ```sh
-claude mcp add onegp --scope user -- npx --yes github:1gp-studio/publisher-mcp#v0.11.0
+claude mcp add onegp --scope user -- npx --yes github:1gp-studio/publisher-mcp#v0.12.0
 ```
 
-已经装过时，用 `claude mcp list` 确认当前生效的配置，只更新其中固定的包版本；保留既有参数和环境配置，不删除 1GP 的授权凭证。上面的命令用于首次安装，不需要每次发布都重新添加。
+已经装过时，用 `claude mcp list` 确认当前生效的配置，只更新其中固定的包版本；保留既有参数和环境配置，不删除 AIWANNA 的授权凭证。上面的命令用于首次安装，不需要每次发布都重新添加。
 
 重新打开 Claude Code。首次 npx 下载较慢，可用 `MCP_TIMEOUT=60000 claude` 启动以放宽启动超时。
 
@@ -46,8 +46,10 @@ claude mcp add onegp --scope user -- npx --yes github:1gp-studio/publisher-mcp#v
 
 ## 使用
 
-1. 告诉 AI（Codex / Claude Code）：**连接 1GP 发布平台**。调用 `connect_platform` 后，用户本人打开返回的授权链接，登录并点击允许。对照页面与工具的客户端指纹。
-2. 打开游戏项目，告诉 AI：**检查当前游戏，支持的话发布到 1GP，把试玩链接给我。**
+**第一次装好后要重开 AI 工具（或新开对话）。** Claude Code、Codex 都在开始会话时加载 MCP，装好的那个对话里通常还看不到新工具；重开后再说一次要做的事即可。
+
+1. 告诉 AI（Codex / Claude Code）：**连接 AIWANNA 发布平台**。调用 `connect_platform` 后，用户本人打开返回的授权链接，登录并点击允许。对照页面与工具的客户端指纹。
+2. 打开游戏项目，告诉 AI：**检查当前游戏，支持的话发布到 AIWANNA，把试玩链接给我。**
 3. MCP 自动读取名字和介绍（Vite 项目读 package.json，Godot 项目读 project.godot）以及要上传的文件；未提供介绍时使用中性的默认介绍，不推断玩法。
 4. `prepare_game` 一次返回项目识别、原发布渠道、版本差异、构建检查、语言、已有可选功能、页面物料 `materials` 和常规物料清单 `promotion`。AI 阅读代码并试玩，补缺的分类、作者主语言标签、主封面、实机截图和短预览；即使不接多语言也检查这些项目。多语言、云存档、排行榜各自可选；首发社区宣传另记为 `features.announcement`。集中解决尚未明确的选项，复用已有授权和检查结果。
 5. 异步发布返回构建 ID 后调用 `wait_for_publish`。每次最多等 45 秒；pending 时继续同一任务，省略 build_id 可恢复当前账号最近任务。只有 ready 表示部署成功，仍需验证实际游戏。
@@ -73,7 +75,7 @@ claude mcp add onegp --scope user -- npx --yes github:1gp-studio/publisher-mcp#v
 
 ## 完整游戏 Vercel 发布（v0.6.0）
 
-Vercel 发布同时包含网页和必要的服务端产物，只需 `connect_platform` 的 1GP 授权。**不要登录用户的 Vercel、读取其团队凭证、新建个人云项目或单独部署后端。** 1GP 使用平台自己的账号上传、部署和管理游戏前后端。
+Vercel 发布同时包含网页和必要的服务端产物，只需 `connect_platform` 的 AIWANNA 授权。**不要登录用户的 Vercel、读取其团队凭证、新建个人云项目或单独部署后端。** AIWANNA 使用平台自己的账号上传、部署和管理游戏前后端。
 
 普通 **Vite + `api/*.js` / `api/*.ts` 游戏，无需预先准备 Vercel 产物**：先调用本地构建工具：
 
@@ -85,7 +87,7 @@ Vercel 发布同时包含网页和必要的服务端产物，只需 `connect_pla
 
 构建和完整校验成功后才写入工具管理的 `.1gp/vercel-output`，不会覆盖同名的未受管理目录；失败保留上次成功产物并清理临时目录。检查和发布可以自动识别该目录，也可明确使用工具返回的 `deployment_target` 和 `vercel_output_directory`。这一步不连接云端、不上传、不发布。已有 `prepare_game` 结果时直接沿用版本差异，提供版本说明后 `publish_game`；不要再传 build_script 重复构建，源码改变时重查相关部分。
 
-其他 npm 静态前端可给 `build_vercel_game` 传 `frontend_output_directory` 和可选的 `build_script`；仅给目录则使用已有前端产物。Next/其他 SSR、动态 API 文件名（如 `[id].ts`）、原生依赖、依赖 `import.meta.url` 的入口或其他不受支持配置会明确停止，需要专用框架适配器或 1GP Docker。
+其他 npm 静态前端可给 `build_vercel_game` 传 `frontend_output_directory` 和可选的 `build_script`；仅给目录则使用已有前端产物。Next/其他 SSR、动态 API 文件名（如 `[id].ts`）、原生依赖、依赖 `import.meta.url` 的入口或其他不受支持配置会明确停止，需要专用框架适配器或 AIWANNA Docker。
 
 本地函数适配器只打包静态模块依赖，不追踪运行时文件。项目或任意传递依赖使用 `fs` / `fs/promises`、`module`、`child_process`、`worker_threads` 或 `vm` 时会停止，即使路径计算与读取分属不同模块。JSON 等数据可通过静态 `import` 打包；确实需要文件系统的项目应使用专用完整产物适配器或 Docker。
 
@@ -109,7 +111,7 @@ Vercel 发布同时包含网页和必要的服务端产物，只需 `connect_pla
 - `static/` 内的网页、浏览器脚本和资源。
 - `functions/<name>.func/` 内的 Node.js 22/24 函数、直接子级 `.vc-config.json`、入口和必要依赖；保留函数所需的 `node_modules`、`package.json` 等运行文件。API 和常规 SSR 与前端在同一部署中运行，SSR 根路由不要求静态 `index.html`。
 
-每个函数必须自包含，不支持引用输出外源码的非空 `filePathMap`。产物内指向同一输出目录的符号链接会安全展开，外部链接和循环链接拒绝。当前不支持 Edge、ISR/prerender、images、wildcard、crons、services/daemons 或动态 middleware；检测到会明确报错，不删除必要配置后继续发布。函数支持 Linux x86_64、最多 2048 MiB 内存、300 秒执行时间和单区域。需要常驻进程、WebSocket、进程内多人房间或其他运行能力时使用下方 **1GP Docker 托管**，不要为了部署自动改写玩法、存储方式或删除后端。
+每个函数必须自包含，不支持引用输出外源码的非空 `filePathMap`。产物内指向同一输出目录的符号链接会安全展开，外部链接和循环链接拒绝。当前不支持 Edge、ISR/prerender、images、wildcard、crons、services/daemons 或动态 middleware；检测到会明确报错，不删除必要配置后继续发布。函数支持 Linux x86_64、最多 2048 MiB 内存、300 秒执行时间和单区域。需要常驻进程、WebSocket、进程内多人房间或其他运行能力时使用下方 **AIWANNA Docker 托管**，不要为了部署自动改写玩法、存储方式或删除后端。
 
 检查只读取项目，不运行构建。发现 API、server 或 SSR 而没有完整产物时返回 `VERCEL_OUTPUT_REQUIRED`；普通 Vite/API 项目调用 `build_vercel_game`，其他项目使用无需 Vercel 登录的专用框架适配器。仅执行 `next build` 不代表已生成此格式；不要上传 `.next` 目录或把后端塞进静态目录。工具本身不调用 Vercel CLI、创建云项目或修改游戏；其他包管理器可先在本地构建，再上传已有产物。发布时如指定完整产物构建脚本，必须生成新的 `config.json`，否则停止；明确上传已有产物时省略 `build_script`。
 
@@ -117,7 +119,7 @@ Vercel 发布同时包含网页和必要的服务端产物，只需 `connect_pla
 
 完整产物上限 **64 MiB、10000 个文件，单文件 16 MiB，配置 JSON 100 KiB**。工具先校验完整包，再分批上传（每批最多 200 文件、4 MiB JSON）；大文件压缩后仍无法放入一批时须缩小或拆分资源。平台返回 30 分钟有效、绑定当前账号和文件内容的回执，最终发布发送文件引用与必要配置；发布清单及版本说明合计最多 4300 KiB，超限在上传前停止。失败或响应不确定时不会自动重试。平台无需安装游戏依赖或执行云端构建。
 
-source map 不上传；检测到凭据、私钥、`.env` 等文件会拒绝。浏览器资源对玩家公开，服务端产物提交给 1GP 并在服务端运行，不作为静态网页资源公开。不要把秘密写入产物；函数配置仅接受官方默认的空 `environment: {}`，不接受任何环境变量值、`env` 或 `envVarsInUse`。
+source map 不上传；检测到凭据、私钥、`.env` 等文件会拒绝。浏览器资源对玩家公开，服务端产物提交给 AIWANNA 并在服务端运行，不作为静态网页资源公开。不要把秘密写入产物；函数配置仅接受官方默认的空 `environment: {}`，不接受任何环境变量值、`env` 或 `envVarsInUse`。
 
 ## 通用静态网页发布
 
@@ -183,14 +185,14 @@ Godot 也使用同一个 `gameSlug` 参数，不需要 `output_directory`。平�
 | inspect_game(project_directory, deployment_target?, vercel_output_directory?, output_directory?, build_script?) | 只读检测当前绝对路径，返回支持情况及构建方式（vercel-output / web-static / godot-web） |
 | connect_platform() | 建立当前客户端连接，返回用户授权网址 |
 | publish_game(project_directory, title?, description?, deployment_target?, vercel_output_directory?, output_directory?, build_script?, gameSlug?) | 检测后发布；可指定原游戏标识，在转移所有权或移动文件夹后继续更新同一游戏 |
-| publish_link(url, project_directory, title?, description?) | 把已部署的可玩 HTTPS 网址发布为 1GP 游戏页，不构建；同一网址再次提交会更新同一作品 |
+| publish_link(url, project_directory, title?, description?) | 把已部署的可玩 HTTPS 网址发布为 AIWANNA 游戏页，不构建；同一网址再次提交会更新同一作品 |
 | get_publish_status(build_id) | 查询当前账号自己的构建和试玩网址 |
 | find_my_game(project_directory, gameSlug?) | 按当前项目找到你自己的游戏；给了编号就核对它是不是这个项目的 |
 | validate_game_text(project_directory, original, translations, separators?) | 上传前检查译文：键名、占位符、换行、分隔符、长度和字体 |
 | set_game_covers(project_directory, gameSlug, base?, special?, modes?, position?) | 各语言封面：底图、专用封面、每种语言的选择和游戏名位置 |
 | set_game_media(project_directory, gameSlug, cover?, screenshots?, preview?, fillMissing?) | 上传已准备好的主封面、实机截图和预览；只补缺主封面/预览，截图追加并按内容去重，保留现有物料 |
 | update_github_game(project_directory, gameSlug, release) | 更新从 GitHub 发布的游戏：确认这是游戏的仓库、改动已提交并推送到发布分支，再让平台从最新提交重新构建；不会替你推送 |
-| check_game_languages(project_directory) | 只读检查游戏有没有做多语言（语言文件、`?lang=`、浏览器语言、1GP SDK），返回检测到的语言、下一步和接入约定 |
+| check_game_languages(project_directory) | 只读检查游戏有没有做多语言（语言文件、`?lang=`、浏览器语言、AIWANNA SDK），返回检测到的语言、下一步和接入约定 |
 | upload_game_text(project_directory, gameSlug, original?, translations?, use?) | 上传游戏自己的原始语言文件和你的 AI 翻好的各语言文件（`{"键名": "文字"}`），平台在 `/i18n/<游戏>/<语言>.json` 提供给玩家 |
 | get_game_text_status(gameSlug, use?) | 每种语言：已翻译、缺哪些键、哪些键的原文改过要重翻 |
 | get_game_text_source(gameSlug, use?) | 只读自动来源配置、来源指纹、待审候选与翻译状态；prepare_game.textSources 已含两种模式 |
@@ -231,9 +233,21 @@ MCP **负责检查、上传和保存，不内置浏览器截图、录屏或图�
 
 本地凭证保存在 `~/.config/1gp-studio/`，目录权限 0700，文件权限 0600。平台仅保存 SHA-256 哈希。凭证不会通过工具结果或浏览器 URL 输出。授权 90 天有效，可发布和管理自己游戏的构建、页面信息、翻译、封面及云存档/排行榜设置，并通过专用工具发布作者明确批准的首发宣传，不能读取玩家存档或代玩家提交成绩；在网站「我的发布」撤销后，再运行 connect_platform 可重新连接。
 
-平台目前限制全站同时 2 个构建、每个账号最多 50 个作品，不设每日次数限制。账号邮箱验证由 Supabase 负责；平台管理员必须配置生产邮件服务，才能支持组织外用户收取登录邮件。1GP 托管团队的 Vercel 套餐及运行限制仍适用；不占用用户个人 Vercel 账号。GitHub 来源继续遵守仓库授权与构建限制。
+平台目前限制全站同时 2 个构建、每个账号最多 50 个作品，不设每日次数限制。账号邮箱验证由 Supabase 负责；平台管理员必须配置生产邮件服务，才能支持组织外用户收取登录邮件。AIWANNA 托管团队的 Vercel 套餐及运行限制仍适用；不占用用户个人 Vercel 账号。GitHub 来源继续遵守仓库授权与构建限制。
 
 开发时可使用 `ONEGP_PLATFORM_URL` 指向另一 HTTPS 平台，或本机 HTTP localhost/127.0.0.1；凭证按平台分别保存。测试运行 `npm test`，包括真实 MCP stdio 客户端集成测试。
+
+## v0.12.0：社区帖带图
+
+- `publish_game_announcement` 和 `complete_game_update` 新增可选 `image`：项目内图片的相对路径（JPG、PNG、WebP），转成 WebP（最长边 1600）后与帖子一起发布，作为帖子的第一张图（社区列表封面）。首发宣传带图时需同时传 `project_directory`。
+- 图片是公告内容的一部分：和标题、正文一起给作者确认，作者认可的内容包括这张图时才传。没有 `image` 的调用与 0.11.0 相同。
+- 同一账号、同一条帖子、同一个文件总是得到同一张已存图片，重试不会多存一份；帖子已发布后，用不同的图片重试按内容冲突处理（`ANNOUNCEMENT_CONFLICT` / `UPDATE_CONFLICT`）。
+- `get_publisher_info` 新增 `post-images` 能力。需配套平台接口 `/api/developer/post-images` 和 `202610240002_post_images_from_tools.sql` 迁移；先完成平台迁移、验证与部署，再发布 MCP 标签。
+- 默认平台地址改为 https://www.aiwanna.games，授权链接也在主域名，作者用网站上已有的登录即可。之前在 `1gp-game-platform.vercel.app` 上的授权继续有效，不用重新 `connect_platform`；`ONEGP_PLATFORM_URL` 指定的其他平台不受影响。
+- 首发只要求分类、标签和主封面；截图和预览可以上线后补。发布前只问要不要顺手发首发社区帖，多语言、云存档、排行榜不再提前追问；`prepare_game` 新增 `optionalFeatures`，发布完成后据此提醒作者还能加哪些功能。`prepare_game` 返回去掉了重复的规则文字。
+- 平台从这一版起让每个游戏保持固定地址，玩家本地存档跨版本保留。`inspect_game`、`prepare_game` 和 `publish_game` 新增 `warnings`：游戏用了 service worker（`SERVICE_WORKER`），或给不带内容指纹的文件设了长缓存（`LONG_CACHE`）时提醒作者，这两种情况会让玩家更新后还拿到旧版本；只提醒，不阻止发布、不改游戏。`get_publisher_info` 新增 `update-freshness-warnings` 能力。
+- 游戏名优先取首页 `<title>`，`vite-project`、`my-app` 这类模板名不再当游戏名。
+- 文字和说明里的平台名统一为 AIWANNA；工具名、`onegp` 配置名和凭证目录不变。
 
 ## v0.11.0：公告确认与更新记录管理
 
@@ -312,14 +326,14 @@ MCP **负责检查、上传和保存，不内置浏览器截图、录屏或图�
 
 ## v0.7.0：游戏内文字多语言
 
-让游戏里的文字跟着玩家在 1GP 网站选的语言走：
+让游戏里的文字跟着玩家在 AIWANNA 网站选的语言走：
 
 1. 发布前 `check_game_languages`。已有多语言：确认打开时先读 `?lang=`；还没有：先问用户要不要做成多语言，同意才改。
 2. 按约定改造（提示词 `make_game_multilingual`）：玩家看到的文字换成键名，写一份原始语言 JSON，接入 SDK 的 `AIWanna.i18n`，中日韩准备字体并保留已有其他语言字体，按钮给长文字留余量。
 3. 用你自己的 AI 按当前网站目标 `zh`、`en`、`ja`、`ko`、`es` 补齐缺失或过期的翻译，跳过原始语言；原文不在目标列表中时保留原文并补齐全部五个目标。键名一致、占位符原样保留，已有其他语言继续保留。
 4. 发布后 `upload_game_text` 上传改过的原始语言文件和本次补齐的翻译，`get_game_text_status` 核对，`set_game_details` 按需补齐五个目标语言的游戏名和简介（先给用户看）。
 
-作者在 1GP 开发者中心手改过的条目不会被上传覆盖；原文改了，旧翻译会标成需要重翻，只重翻改过的条目。平台开通翻译时，缺的条目也会由平台补上。
+作者在 AIWANNA 开发者中心手改过的条目不会被上传覆盖；原文改了，旧翻译会标成需要重翻，只重翻改过的条目。平台开通翻译时，缺的条目也会由平台补上。
 
 ## v0.6.2
 
@@ -351,12 +365,12 @@ MCP **负责检查、上传和保存，不内置浏览器截图、录屏或图�
 ## Docker 游戏：全程在本地 AI 工具里发布
 
 需要 Node.js 24+、Docker（含 Buildx），Windows 的 Docker Desktop 需使用 Linux containers。
-只需要已有的 **1GP 平台授权**；无需 AWS 账号、AWS SSO、Access Key 或 ECR 登录。
+只需要已有的 **AIWANNA 平台授权**；无需 AWS 账号、AWS SSO、Access Key 或 ECR 登录。
 当前沿用团队管理员账号、单台主机一个游戏的实验范围。
 
 可以直接告诉 AI：
 
-> 用 1GP MCP 把当前游戏发布到 EC2 Docker 托管。检查代码并准备 Dockerfile 和 .dockerignore，在本地构建 Linux/amd64 镜像，上传给平台，等校验通过后发布，把可玩的链接给我。使用稳定的项目标识 my-game，更新时不要改变它。不要申请 AWS 凭证，也不要直接推送 ECR。
+> 用 AIWANNA MCP 把当前游戏发布到 EC2 Docker 托管。检查代码并准备 Dockerfile 和 .dockerignore，在本地构建 Linux/amd64 镜像，上传给平台，等校验通过后发布，把可玩的链接给我。使用稳定的项目标识 my-game，更新时不要改变它。不要申请 AWS 凭证，也不要直接推送 ECR。
 
 工具调用顺序：
 
@@ -402,10 +416,10 @@ MCP 自动移除自己创建的临时镜像标签，保留私有临时目录中�
 - `choose_publish_path`：检查实际运行需求并推荐渠道，优先本地构建和 API 上传必要产物。
 - `publish_local_artifacts`：固定本地 API 上传；已有产物先验证复用，没有则补齐构建，不要求网页手动上传。
 - `prepare_github_publish`：传入 `repo`，可选 `kind`、`ref`、`check_result`，根据检查结果准备指定仓库。保持 GitHub 渠道，不静默改为本地上传或 Docker；完成后回原表单重新检查。
-- `prepare_docker_publish`：固定 1GP 团队运营的 Docker/EC2，检查权限和运行限制，通过现有镜像上传及发布工具完成。
+- `prepare_docker_publish`：固定 AIWANNA 团队运营的 Docker/EC2，检查权限和运行限制，通过现有镜像上传及发布工具完成。
 - `update_game`：更新已发布的游戏（传入 `gameSlug`），按 `prepare_game` 返回的发布方式走，不用按渠道选提示词。
 - `add_cloud_saves`：按作者选择复用或开启云存档，读取真实配置，指导接入并验证存档/恢复逻辑；不会顺带开启排行榜。
 - `add_leaderboard`：按作者选择复用或创建榜单，明确计分规则，指导接入真实开局/结算流程；不会顺带开启云存档。
 - `make_game_multilingual`：把游戏里的文字做成多语言（键名 + 原始语言文件 + SDK），用你自己的 AI 按需补齐五个默认目标语言后上传，保留已有其他语言。
 
-所有新增托管使用 1GP 的 Vercel/AWS 资源，不要求发布者的云账号或密钥。现成链接保持原站托管。手动选择渠道后，不兼容时解释原因并建议切换，不能自行更换。只做必要部署适配，不擅自重写玩法、协议或存储；部署 ready 不代表多人玩法已验证。
+所有新增托管使用 AIWANNA 的 Vercel/AWS 资源，不要求发布者的云账号或密钥。现成链接保持原站托管。手动选择渠道后，不兼容时解释原因并建议切换，不能自行更换。只做必要部署适配，不擅自重写玩法、协议或存储；部署 ready 不代表多人玩法已验证。
