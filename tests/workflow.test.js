@@ -237,6 +237,7 @@ test('publishing records the returned build and a restarted MCP process waits fo
   let statusReads = 0;
   const f = await fixture(t, request => {
     if (request.url === '/api/developer/game-updates') return { body: { created: true, update: { id: request.body.updateId, gameSlug: null, state: 'open' } } };
+    if (request.url.startsWith('/api/publish/releases/context?')) return { body: { previous: null } };
     if (request.method === 'POST') { assert.equal(request.url, '/api/publish'); return { body: { id: buildId, state: 'queued', path: '/games/owned-game' } }; }
     assert.equal(request.method, 'GET'); assert.equal(request.url, `/api/publish/${buildId}`);
     return { body: { id: buildId, state: ++statusReads === 1 ? 'building' : 'ready', games: { slug: 'owned-game' } } };
@@ -253,9 +254,9 @@ test('publishing records the returned build and a restarted MCP process waits fo
   const ready = parsed(await restarted.callTool({ name: 'wait_for_publish', arguments: { wait_seconds: 0 } }));
   assert.equal(ready.state, 'ready'); assert.equal(ready.resumed, true); assert.equal(ready.buildId, buildId);
   assert.equal(ready.gameUrl, `${f.platform.origin}/games/owned-game`);
-  assert.deepEqual(f.requests.map(request => request.method), ['POST', 'POST', 'GET', 'GET']);
-  assert.equal(f.requests[1].body.source, 'local');
-  const { sourceFiles, ...metadata } = f.requests[1].body.release;
+  assert.deepEqual(f.requests.map(request => request.method), ['POST', 'GET', 'POST', 'GET', 'GET']);
+  assert.equal(f.requests[2].body.source, 'local');
+  const { sourceFiles, ...metadata } = f.requests[2].body.release;
   assert.deepEqual(metadata, groupedRelease); assert.deepEqual(Object.keys(sourceFiles), ['index.html']);
   assert.match(sourceFiles['index.html'], /^[a-f0-9]{64}$/);
 });

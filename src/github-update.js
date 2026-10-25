@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { realpath } from 'node:fs/promises';
 import { isAbsolute, resolve } from 'node:path';
+import { isReleaseSourcePath } from './source-files.js';
 const exec = promisify(execFile);
 
 // How each publishing channel is updated (prepare_release returns this as channel/nextSteps).
@@ -25,8 +26,15 @@ export function updateRoute(context) {
   }
 }
 
-const git = async (directory, args) => (await exec('git', ['-C', directory, ...args], { timeout: 20000, maxBuffer: 1024 * 1024 })).stdout.trim();
+const gitOutput = async (directory, args) => (await exec('git', ['-C', directory, ...args], { timeout: 20000, maxBuffer: 1024 * 1024 })).stdout;
+const git = async (directory, args) => (await gitOutput(directory, args)).trim();
 const repoOf = url => url.match(/github\.com[:/]([^/\s]+\/[^/\s]+?)(?:\.git)?\/?$/i)?.[1]?.toLowerCase();
+async function localChanges(directory) {
+  const tracked = await gitOutput(directory, ['status', '--porcelain=v1', '--untracked-files=no', '-z']);
+  const untracked = await gitOutput(directory, ['ls-files', '--others', '--exclude-standard', '-z']);
+  return [...tracked.split('\0').filter(Boolean), ...untracked.split('\0').filter(path => path && isReleaseSourcePath(path)).map(path => `?? ${path}`)];
+}
+const uncommitted = (files, branch) => ({ error: '有还没提交的源码或资源改动。按已有授权提交并推送；尚未授权时再询问。', code: 'UNCOMMITTED_CHANGES', branch, files: files.slice(0, 20) });
 
 // A GitHub game: check that this folder is that repository and the work is on GitHub, then ask the
 // platform to rebuild from the branch it publishes. Never pushes; says what to push instead.
@@ -45,17 +53,28 @@ export async function updateGithubGame(platform, projectDirectory, gameSlug, rel
   const branchInfo = await platform.request(`/api/games/${encodeURIComponent(gameSlug)}/build`);
   const branch = typeof branchInfo.branch === 'string' && branchInfo.branch ? branchInfo.branch : null;
   if (!branch) return { error: branchInfo.error ?? '读不到这个游戏发布用的分支。', code: 'BRANCH_UNKNOWN' };
-  const dirty = await git(directory, ['status', '--porcelain', '--untracked-files=no']).catch(() => '');
-  if (dirty) return { error: '有还没提交的改动。按已有授权提交并推送；尚未授权时再询问。', code: 'UNCOMMITTED_CHANGES', branch, files: dirty.split('\n').slice(0, 20) };
-  try { await git(directory, ['fetch', '--quiet', remote, branch]); } catch { return { error: `无法从 ${remote} 读取分支 ${branch}（网络或权限问题）。`, code: 'FETCH_FAILED', branch }; }
-  const head = await git(directory, ['rev-parse', 'HEAD']);
-  const remoteHead = await git(directory, ['rev-parse', `${remote}/${branch}`]).catch(() => '');
-  const onRemote = remoteHead && await git(directory, ['merge-base', '--is-ancestor', head, `${remote}/${branch}`]).then(() => true, () => false);
-  if (!onRemote) {
-    const ahead = await git(directory, ['log', '--oneline', `${remote}/${branch}..HEAD`]).catch(() => '');
+  let head;
+  try {
+    await git(directory, ['check-ref-format', `refs/heads/${branch}`]);
+    const dirty = await localChanges(directory);
+    if (dirty.length) return uncommitted(dirty, branch);
+    head = await git(directory, ['rev-parse', 'HEAD']);
+  } catch { return { error: '无法核对本地 Git 状态或发布分支，未提交构建。', code: 'GIT_STATUS_UNAVAILABLE', branch }; }
+  try { await git(directory, ['fetch', '--quiet', remote, `refs/heads/${branch}`]); } catch { return { error: `无法从 ${remote} 读取分支 ${branch}（网络或权限问题）。`, code: 'FETCH_FAILED', branch }; }
+  const remoteHead = await git(directory, ['rev-parse', 'FETCH_HEAD^{commit}']).catch(() => '');
+  if (head !== remoteHead) {
+    const behind = remoteHead && await git(directory, ['merge-base', '--is-ancestor', head, remoteHead]).then(() => true, () => false);
+    if (behind) return { error: `GitHub 的 ${branch} 分支比本地更新。先同步并检查新增改动，再重新 prepare_game；不能直接发布本地尚未检查的版本。`, code: 'REMOTE_AHEAD', branch, localCommit: head, remoteCommit: remoteHead };
+    const ahead = remoteHead ? await git(directory, ['log', '--oneline', `${remoteHead}..HEAD`]).catch(() => '') : '';
     return { error: `本地的提交还没在 GitHub 的 ${branch} 分支上。核对这些提交并按已有授权推送；缺少授权时先询问。目标： ${remote} ${branch}（不要强推），再调用 update_github_game。`, code: 'NOT_PUSHED', branch, commits: ahead.split('\n').filter(Boolean).slice(0, 20) };
   }
-  const result = await platform.request(`/api/games/${encodeURIComponent(gameSlug)}/build`, { body: { kind: 'branch', value: branch, ...(release ? { release } : {}) } });
+  try {
+    const dirty = await localChanges(directory);
+    if (dirty.length) return uncommitted(dirty, branch);
+    if (await git(directory, ['rev-parse', 'HEAD']) !== head) return { error: '核对期间本地提交已改变，请重新检查后再发布。', code: 'LOCAL_COMMIT_CHANGED', branch };
+  } catch { return { error: '无法再次核对本地 Git 状态，未提交构建。', code: 'GIT_STATUS_UNAVAILABLE', branch }; }
+  // Preserve the publishing branch while fencing a remote push between fetch and submission.
+  const result = await platform.request(`/api/games/${encodeURIComponent(gameSlug)}/build`, { body: { kind: 'branch', value: branch, expectedCommit: head, ...(release ? { release } : {}) } });
   if (result.error) return result;
-  return { ...result, branch, commit: remoteHead, message: '已从 GitHub 最新提交开始构建。用 get_publish_status 等到 ready 或 failed，不要重复提交。' };
+  return { ...result, branch, expectedCommit: head, message: '平台已接受 GitHub 构建请求。用 wait_for_publish 等到 ready 或 failed，不要重复提交。' };
 }

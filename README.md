@@ -19,7 +19,7 @@
 ```toml
 [mcp_servers.onegp]
 command = "npx"
-args = ["--yes", "github:1gp-studio/publisher-mcp#v0.12.0"]
+args = ["--yes", "github:1gp-studio/publisher-mcp#v0.12.1"]
 startup_timeout_sec = 60
 tool_timeout_sec = 600
 ```
@@ -33,7 +33,7 @@ tool_timeout_sec = 600
 在终端运行一次（`--scope user` 对你本人的所有项目生效）：
 
 ```sh
-claude mcp add onegp --scope user -- npx --yes github:1gp-studio/publisher-mcp#v0.12.0
+claude mcp add onegp --scope user -- npx --yes github:1gp-studio/publisher-mcp#v0.12.1
 ```
 
 已经装过时，用 `claude mcp list` 确认当前生效的配置，只更新其中固定的包版本；保留既有参数和环境配置，不删除 AIWANNA 的授权凭证。上面的命令用于首次安装，不需要每次发布都重新添加。
@@ -51,7 +51,7 @@ claude mcp add onegp --scope user -- npx --yes github:1gp-studio/publisher-mcp#v
 1. 告诉 AI（Codex / Claude Code）：**连接 AIWANNA 发布平台**。调用 `connect_platform` 后，用户本人打开返回的授权链接，登录并点击允许。对照页面与工具的客户端指纹。
 2. 打开游戏项目，告诉 AI：**检查当前游戏，支持的话发布到 AIWANNA，把试玩链接给我。**
 3. MCP 自动读取名字和介绍（Vite 项目读 package.json，Godot 项目读 project.godot）以及要上传的文件；未提供介绍时使用中性的默认介绍，不推断玩法。
-4. `prepare_game` 一次返回项目识别、原发布渠道、版本差异、构建检查、语言、已有可选功能、页面物料 `materials` 和常规物料清单 `promotion`。AI 阅读代码并试玩，补缺的分类、作者主语言标签、主封面、实机截图和短预览；即使不接多语言也检查这些项目。多语言、云存档、排行榜各自可选；首发社区宣传另记为 `features.announcement`。集中解决尚未明确的选项，复用已有授权和检查结果。
+4. `prepare_game` 一次返回项目识别、原发布渠道、版本差异、构建检查、语言、已有可选功能、页面物料 `materials` 和常规物料清单 `promotion`。AI 阅读代码并试玩，补缺的分类、作者主语言标签、主封面、实机截图和短预览；即使不接多语言也检查这些项目。发布前只询问首次发布是否发社区公告，以 `features.announcement` 记住意向。多语言、云存档、排行榜沿用已有设置，作者主动要求时才接入，发布后按 `prepare_game.optionalFeatures` 提醒尚未使用的可选功能；复用已有授权和检查结果。
 5. 异步发布返回构建 ID 后调用 `wait_for_publish`。每次最多等 45 秒；pending 时继续同一任务，省略 build_id 可恢复当前账号最近任务。只有 ready 表示部署成功，仍需验证实际游戏。
 6. 把最终合并的版本公告 `title`、`notes` 给作者看；作者明确认可具体内容后才 `complete_game_update(..., approved:true)`。发布游戏、技术部署的授权不等于公告认可。同一内容已获明确认可就沿用，不重复询问；改动内容后重新确认。尚未认可时保留草稿和同一 `update_id`，不自动发公告。
 
@@ -200,7 +200,7 @@ Godot 也使用同一个 `gameSlug` 参数，不需要 `output_directory`。平�
 | approve_game_text_candidates(gameSlug, keys, expectedRevision, expectedFingerprint) | 仅批准逐项审查的短语候选，绑定 config.revision 和 source_fingerprint |
 | set_game_details(gameSlug, titles?, descriptions?, languages?, genre?, tags?, fillMissing?) | 游戏名、简介和支持的语言；fillMissing:true 还可补缺分类和作者主语言标签，保留已有内容 |
 
-v0.9.0 还提供 `get_publisher_info`（实际运行版本和能力）、`get_game_materials`（页面物料与封面预览）、`get_game_announcement`（首发宣传资格和草稿）、`publish_game_announcement`（发布已批准的首发帖子）。`set_game_details` 与 `set_game_covers` 的 `fillMissing:true` 用于只补缺失文案或未设置的封面模式，保留已有内容和作者选择。
+v0.9.0 还提供 `get_publisher_info`（实际运行版本和能力）、`get_game_materials`（页面物料与封面预览）、`get_game_announcement`（首发宣传资格和草稿）、`publish_game_announcement({gameSlug,launchReference,title,body,approved:true})`（发布已批准的首发帖子）。`set_game_details` 与 `set_game_covers` 的 `fillMissing:true` 用于只补缺失文案或未设置的封面模式，保留已有内容和作者选择。
 
 ### 自动同步游戏文字
 
@@ -236,6 +236,14 @@ MCP **负责检查、上传和保存，不内置浏览器截图、录屏或图�
 平台目前限制全站同时 2 个构建、每个账号最多 50 个作品，不设每日次数限制。账号邮箱验证由 Supabase 负责；平台管理员必须配置生产邮件服务，才能支持组织外用户收取登录邮件。AIWANNA 托管团队的 Vercel 套餐及运行限制仍适用；不占用用户个人 Vercel 账号。GitHub 来源继续遵守仓库授权与构建限制。
 
 开发时可使用 `ONEGP_PLATFORM_URL` 指向另一 HTTPS 平台，或本机 HTTP localhost/127.0.0.1；凭证按平台分别保存。测试运行 `npm test`，包括真实 MCP stdio 客户端集成测试。
+
+## v0.12.1：发布内容校验与作者文案保护
+
+- GitHub 更新要求本地提交与远端发布分支完全一致，并让平台校验预期提交，避免发布未经检查的新代码。
+- 托管 Vercel 构建记录源码指纹，拒绝过期产物、无效标记及构建期间的源码变化。
+- 更新已有游戏时，省略标题或简介会保留作者的平台文案；读取失败时停止发布。
+- 网页与 MCP 共用可选功能政策和接入说明，保留现有文字来源模式与作者选择。
+- 先部署本次配套平台修复，再发布此标签。安装后重新加载 MCP，确认运行版本为 0.12.1 或更新版本。
 
 ## v0.12.0：社区帖带图
 
@@ -418,8 +426,8 @@ MCP 自动移除自己创建的临时镜像标签，保留私有临时目录中�
 - `prepare_github_publish`：传入 `repo`，可选 `kind`、`ref`、`check_result`，根据检查结果准备指定仓库。保持 GitHub 渠道，不静默改为本地上传或 Docker；完成后回原表单重新检查。
 - `prepare_docker_publish`：固定 AIWANNA 团队运营的 Docker/EC2，检查权限和运行限制，通过现有镜像上传及发布工具完成。
 - `update_game`：更新已发布的游戏（传入 `gameSlug`），按 `prepare_game` 返回的发布方式走，不用按渠道选提示词。
-- `add_cloud_saves`：按作者选择复用或开启云存档，读取真实配置，指导接入并验证存档/恢复逻辑；不会顺带开启排行榜。
+- `add_cloud_saves`：按作者选择复用或开启云存档，读取真实配置，指导接入并验证存档/恢复逻辑；不会顺带开启排行榜。原生 REST 按返回文档向所有官方域名尝试握手，核验父窗口、官方 origin 与 source/type/requestId，成功回复还需核验 `session.gameId` 和 `apiOrigin === event.origin`，之后使用实际回复的 origin；`platformOrigin` 不是唯一可用父页面域名，SDK 会识别实际父页面。
 - `add_leaderboard`：按作者选择复用或创建榜单，明确计分规则，指导接入真实开局/结算流程；不会顺带开启云存档。
-- `make_game_multilingual`：把游戏里的文字做成多语言（键名 + 原始语言文件 + SDK），用你自己的 AI 按需补齐五个默认目标语言后上传，保留已有其他语言。
+- `make_game_multilingual`：沿用 `prepare_game.textSources` 的 keys/phrases 模式和已有选择；按项目实现接 SDK 或已审查的显示桥，不强制改写成键名。需要时登记公开原文来源，逐项审查候选并绑定 revision 与来源指纹，再用自己的 AI 补齐五个默认目标语言的完整词表，保留已有其他语言。
 
 所有新增托管使用 AIWANNA 的 Vercel/AWS 资源，不要求发布者的云账号或密钥。现成链接保持原站托管。手动选择渠道后，不兼容时解释原因并建议切换，不能自行更换。只做必要部署适配，不擅自重写玩法、协议或存储；部署 ready 不代表多人玩法已验证。

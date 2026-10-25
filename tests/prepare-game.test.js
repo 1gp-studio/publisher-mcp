@@ -189,7 +189,7 @@ test('ambiguous, unauthorized and new projects never fetch a fabricated game con
   assert.equal(fresh.channel, 'new'); assert.equal(fresh.integrations, null); assert.equal(fresh.materials, null);
   assert.equal(fresh.promotion.snapshot, 'new_game');
   assert.deepEqual(fresh.promotion.missing, ['genre', 'tags', 'mainCover', 'screenshots', 'preview']);
-  assert.ok(fresh.decisions.includes('announcement'));
+  assert.deepEqual(fresh.decisions, ['announcement'], 'first launch only asks about its optional announcement');
   assert.equal(f.calls.length, 2); assert.match(f.calls[1].path, /\?projectId=[a-f0-9]{32}$/);
 });
 

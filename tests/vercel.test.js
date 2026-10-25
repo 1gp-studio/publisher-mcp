@@ -188,7 +188,7 @@ test('MCP publishes whole games with receipts, unchanged release/gameSlug and no
     if(path==='/api/developer/games/match')res.end(JSON.stringify({game:{id:gameId,slug:'original',title:'Full game'}}));
     else if(path==='/api/publish/releases/context')res.end(JSON.stringify({gameSlug:'original',source:'local',previous:null}));
     else if(path==='/api/developer/game-integrations/original')res.end(JSON.stringify({game:{id:gameId,slug:'original'},cloudSaves:{enabled:false},leaderboards:[]}));
-    else if(path==='/api/developer/game-materials/original')res.end(JSON.stringify({game:{id:gameId,slug:'original'},original:{locale:'en'},languages:[],covers:{}}));
+    else if(path==='/api/developer/game-materials/original')res.end(JSON.stringify({game:{id:gameId,slug:'original'},original:{locale:'en',title:'Author game title',description:'Author game description'},languages:[],covers:{}}));
     else if(path==='/api/developer/text-source/original')res.end(JSON.stringify({config:null,engine:null,status:[],integration:{state:'not_verified',message:'Renderer integration needs verification'}}));
     else if(path==='/api/developer/game-updates'){
       const created=registeredUpdate===null;
@@ -216,8 +216,10 @@ test('MCP publishes whole games with receipts, unchanged release/gameSlug and no
   const release={updateId:prepared.updateId,version:'1.0.0',title:'First game',notes:'Initial playable game',changeType:'minor'};
   const args={project_directory:root,deployment_target:'vercel',gameSlug:'original',release};
   const published=await client.callTool({name:'publish_game',arguments:args});assert.equal(published.isError,false,JSON.stringify(published));
-  assert.equal(calls.length,4);assert.equal(calls[0].path,'/api/developer/game-updates');assert.deepEqual(calls[0].body,{updateId:prepared.updateId,gameSlug:'original'});
-  assert.equal(calls[1].path,'/api/publish/vercel/files');assert.equal(calls[1].body.files.length,200);assert.equal(calls[2].path,'/api/publish/vercel/files');assert.equal(calls[3].path,'/api/publish');const body=calls[3].body;
+  assert.deepEqual(calls.map(call=>call.path),['/api/developer/game-updates','/api/publish/releases/context','/api/developer/game-materials/original','/api/publish/vercel/files','/api/publish/vercel/files','/api/publish']);
+  assert.deepEqual(calls[0].body,{updateId:prepared.updateId,gameSlug:'original'});
+  assert.equal(calls[3].body.files.length,200);const body=calls[5].body;
+  assert.equal(body.title,'Author game title');assert.equal(body.description,'Author game description');
   assert.equal(body.buildMethod,'vercel-output');assert.equal(body.source,'local');assert.equal(body.gameSlug,'original');assert.equal(body.release.version,'1.0.0');
   for(const [key,value]of Object.entries(release))assert.equal(body.release[key],value,`unchanged release.${key}`);
   assert.ok(body.files.every(file=>file.receipt));assert.ok(body.files.some(file=>file.file.includes('/node_modules/')));
@@ -226,8 +228,8 @@ test('MCP publishes whole games with receipts, unchanged release/gameSlug and no
   assert.equal(body.files.some(file=>Object.hasOwn(file,'encoding')),false,'receipt protocol has no encoding property');
   assert.ok(calls.every(call=>call.authorization==='Bearer '+'a'.repeat(64)));
   rejectUpload=true;const failed=await client.callTool({name:'publish_game',arguments:args});assert.equal(failed.isError,true);
-  assert.equal(calls.length,6,'same-group registration and one failed upload never proceed to deploy or retry');
-  assert.deepEqual(calls.slice(4).map(call=>call.path),['/api/developer/game-updates','/api/publish/vercel/files']);
-  assert.deepEqual(calls[4].body,{updateId:prepared.updateId,gameSlug:'original'});
+  assert.equal(calls.length,10,'same-group registration, metadata reads and one failed upload never proceed to deploy or retry');
+  assert.deepEqual(calls.slice(6).map(call=>call.path),['/api/developer/game-updates','/api/publish/releases/context','/api/developer/game-materials/original','/api/publish/vercel/files']);
+  assert.deepEqual(calls[6].body,{updateId:prepared.updateId,gameSlug:'original'});
   assert.equal(calls.filter(call=>call.path==='/api/publish').length,1,'an upload failure must not submit another deployment');
 });

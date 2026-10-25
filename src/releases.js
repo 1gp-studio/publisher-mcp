@@ -7,16 +7,13 @@ import { promisify } from 'node:util';
 const exec = promisify(execFile);
 import { updateRoute } from './github-update.js';
 import { findMyGame } from './game-match.js';
-const excluded = /^(?:\..*|node_modules|dist|build|out|vendor|coverage|target)$/i;
-const secret = /^(?:credentials.*|secrets.*|.*\.(?:pem|key))$/i;
+import { isReleaseSourcePath } from './source-files.js';
 export async function sourceSnapshot(directory) {
   if (!isAbsolute(directory)) throw new Error('Project directory must be absolute');
   const root = await realpath(directory), files = {}; let total = 0;
   async function walk(path, prefix = '') {
     for (const entry of await readdir(path, { withFileTypes:true })) {
-      if (excluded.test(entry.name) || secret.test(entry.name)) continue;
-      // The top-level promotion kit is uploaded separately, never game source/build input.
-      if (!prefix && entry.name.toLowerCase() === '1gp-kit') continue;
+      if (!isReleaseSourcePath(prefix + entry.name)) continue;
       const name = prefix + entry.name, absolute = join(path,entry.name);
       if (entry.isSymbolicLink()) continue;
       if (entry.isDirectory()) { await walk(absolute,name+'/'); continue; }

@@ -7,8 +7,9 @@ import { webPackage,outputPath,validateBuildScript } from './web-plan.js';
 import { runBuild } from './bundle.js';
 import { bundleVercelOutput } from './vercel-output.js';
 import { validateVercelOutputFile,VERCEL_OUTPUT_LIMITS } from './vercel-validation.js';
+import { managedVercelDirectory,vercelSourceFingerprint } from './vercel-freshness.js';
 
-const managedDirectory='.1gp/vercel-output';
+const managedDirectory=managedVercelDirectory;
 const fail=message=>{throw new Error('UNSUPPORTED_BUILD: '+message);};
 const object=(value,label)=>{if(!value||typeof value!=='object'||Array.isArray(value))fail(`${label} 必须是对象。`);return value;};
 const onlyKeys=(value,keys,label)=>{for(const key of Object.keys(value))if(!keys.includes(key))fail(`${label} 的 ${key} 尚不能由本地适配器转换；请使用完整预构建产物或 AIWANNA Docker，不会忽略此配置。`);};
@@ -164,6 +165,8 @@ export async function buildVercelGame(projectDirectory,{frontendOutputDirectory,
     let previousOwner;try{if(markerStat?.isFile()&&!markerStat.isSymbolicLink())previousOwner=JSON.parse(await readFile(marker,'utf8')).projectId;}catch{}
     if(old&&(!old.isDirectory()||old.isSymbolicLink()||previousOwner!==owner))fail('.1gp/vercel-output 已存在且不属于此工具管理，不会覆盖；请保留或移动它后重试。');
     if(markerStat&&previousOwner!==owner)fail('完整产物管理标记不匹配，不会覆盖现有文件。');
+    const sourceInputs={...(frontendDirectory?{frontendDirectory}:{}),generatedFrontend:Boolean(script)};
+    const sourceFingerprint=await vercelSourceFingerprint(root,sourceInputs);
     temp=await mkdtemp(join(root,'.1gp-vercel-build-'));const output=join(temp,'output'),staticDirectory=join(output,'static');await mkdir(output);
     if(frontendDirectory) {
       const source=await outputPath(root,frontendDirectory,{building:true});
@@ -179,9 +182,10 @@ export async function buildVercelGame(projectDirectory,{frontendOutputDirectory,
     for(const entry of entries)await bundleFunction(root,entry,join(output,'functions',entry.name+'.func'),settings.get(entry.file));
     await writeFile(join(output,'config.json'),JSON.stringify({version:3,routes:[...routes,{handle:'filesystem'},{src:'/(.*)',dest:'/index.html'}]}));
     const bundle=await bundleVercelOutput(root,output);
+    if(sourceFingerprint!==await vercelSourceFingerprint(root,sourceInputs))throw new Error('LOCAL_BUILD_FAILED: 构建期间源码或构建配置发生变化，未替换已有托管产物。请等修改完成后重新调用 build_vercel_game。');
     if(old)await rename(managed,join(temp,'previous-output'));
-    try{await rename(output,managed);await writeFile(marker,JSON.stringify({tool:'1gp-publisher-mcp',version:1,projectId:owner}),{mode:0o600});}
+    try{await rename(output,managed);await writeFile(marker,JSON.stringify({tool:'1gp-publisher-mcp',version:2,projectId:owner,sourceFingerprint,sourceInputs}),{mode:0o600});}
     catch(error){if(old){await rm(managed,{recursive:true,force:true});await rename(join(temp,'previous-output'),managed);}throw error;}
-    return {ready:true,buildMethod:'vercel-output',project_directory:root,deployment_target:'vercel',vercel_output_directory:managedDirectory,functionCount:entries.length,fileCount:bundle.files.length,artifactBytes:bundle.size,uploadFiles:bundle.files.map(file=>file.file),message:'已在本地构建前端与 API 函数，未上传或部署。接下来 prepare_release 后，用返回的 project_directory、deployment_target、vercel_output_directory 调用 publish_game，由 AIWANNA 统一托管，无需 Vercel 登录。'};
+    return {ready:true,buildMethod:'vercel-output',project_directory:root,deployment_target:'vercel',vercel_output_directory:managedDirectory,functionCount:entries.length,fileCount:bundle.files.length,artifactBytes:bundle.size,uploadFiles:bundle.files.map(file=>file.file),message:'已在本地构建前端与 API 函数，未上传或部署。复用已有 prepare_game 的游戏识别、发布渠道、版本差异和 updateId；尚未准备时才调用 prepare_game，不重复 prepare_release。用本次返回的 project_directory、deployment_target、vercel_output_directory 调用 publish_game，带上原准备的 release.updateId，不再传 build_script 重复构建。由 AIWANNA 统一托管，无需 Vercel 登录。'};
   }finally{if(temp)await rm(temp,{recursive:true,force:true});await lock.close();await rm(lockPath,{force:true});}
 }

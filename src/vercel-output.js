@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import { webPackage,outputPath,validateBuildScript,serverRequirements,fullGameGuidance } from './web-plan.js';
 import { runBuild } from './bundle.js';
 import { validateVercelOutputFile,validateVercelOutputFiles,VERCEL_OUTPUT_LIMITS } from './vercel-validation.js';
+import { managedVercelDirectory,managedVercelMetadata,assertManagedVercelFreshness } from './vercel-freshness.js';
 
 export const VERCEL_LIMITS={...VERCEL_OUTPUT_LIMITS,bytes:VERCEL_OUTPUT_LIMITS.totalBytes};
 const fail=message=>{throw new Error('UNSUPPORTED_BUILD: '+message);};
@@ -20,14 +21,15 @@ export async function planVercel(root,{deploymentTarget,vercelOutputDirectory,ou
   let output=await outputPath(root,directory,{building:true});
   let config=await lstat(join(output,'config.json')).catch(()=>null);
   if(!config&&vercelOutputDirectory===undefined) {
-    const marker=join(root,'.1gp/vercel-output.owner.json'),stat=await lstat(marker).catch(()=>null);
-    if(stat?.isFile()&&!stat.isSymbolicLink()&&stat.size<1000) {
-      let managed;try{managed=JSON.parse(await readFile(marker,'utf8')).projectId===createHash('sha256').update(root).digest('hex');}catch{}
-      if(managed){directory='.1gp/vercel-output';output=await outputPath(root,directory,{building:true});config=await lstat(join(output,'config.json')).catch(()=>null);}
-    }
+    if(await managedVercelMetadata(root)){directory=managedVercelDirectory;output=await outputPath(root,directory,{building:true});config=await lstat(join(output,'config.json')).catch(()=>null);}
   }
   if(!selected&&!config)return null;
   const pkg=await webPackage(root);validateBuildScript(pkg,buildScript);
+  const managedPath=join(root,managedVercelDirectory);
+  if(config&&(output===managedPath||await realpath(output)===await realpath(managedPath).catch(()=>null))) {
+    const metadata=await managedVercelMetadata(root);
+    await assertManagedVercelFreshness(root,metadata);
+  }
   return {kind:buildScript?'custom':'prebuilt',pkg,output,outputDirectory:directory,buildScript,missing:!config&&!buildScript};
 }
 

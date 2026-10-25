@@ -26,7 +26,7 @@ function workflowResponse(req,res,input={}) {
   if(path.pathname==='/api/developer/games/match') body=input.slug?{game:{slug:input.slug,title:'Game'}}:{matches:[]};
   else if(path.pathname==='/api/publish/releases/context') body={source:slug?'local':null,...(slug?{gameSlug:slug}:{}),previous:null};
   else if(path.pathname==='/api/developer/game-updates') body={created:true,update:{id:input.updateId,gameSlug:input.gameSlug??null,state:'open'}};
-  else if(path.pathname.startsWith('/api/developer/game-materials/')) body={game:{id:'11111111-1111-4111-8111-111111111111',slug:path.pathname.split('/').at(-1)},original:{locale:'zh'},languages:[],covers:{}};
+  else if(path.pathname.startsWith('/api/developer/game-materials/')) body={game:{id:'11111111-1111-4111-8111-111111111111',slug:path.pathname.split('/').at(-1)},original:{locale:'zh',title:'Game',description:'Saved author description'},languages:[],covers:{}};
   else if(path.pathname.startsWith('/api/developer/game-integrations/')) body={game:{id:'11111111-1111-4111-8111-111111111111',slug:path.pathname.split('/').at(-1)},platformOrigin:'https://www.ai-made.games',cloudSaves:{enabled:false,schemaVersion:1},leaderboards:[]};
   else if(path.pathname.startsWith('/api/developer/text-source/')) body={config:null,engine:null,status:[],integration:{state:'not_verified',message:'Renderer integration needs verification'}};
   else return false;

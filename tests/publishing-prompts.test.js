@@ -1,10 +1,62 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import packageInfo from '../package.json' with { type: 'json' };
 import { automaticPublishPrompt, localPublishPrompt, dockerPublishPrompt, multilingualPrompt, cloudSavesPrompt, leaderboardsPrompt, updateGamePrompt, githubPreparationPrompt } from '../src/publishing-prompts.js';
 import { classificationGuidance } from '../src/classification-guidance.js';
 import { updateApprovalGuidance, updateHistoryGuidance } from '../src/update-approval-guidance.js';
+import { multilingualSourceGuidance, cloudSaveOriginGuidance } from '../src/integration-guidance.js';
+import { publishingFeaturePolicy } from '../src/publishing-policy.js';
+
+test('registered MCP prompts expose shared integration rules and schema-complete announcement examples', async () => {
+ const client = new Client({ name: 'prompt-contract-test', version: '1.0.0' });
+ const transport = new StdioClientTransport({
+  command: process.execPath,
+  args: [fileURLToPath(new URL('../src/server.js', import.meta.url))],
+  env: { PATH: process.env.PATH ?? '', ONEGP_PLATFORM_URL: 'http://127.0.0.1:1' },
+  stderr: 'pipe',
+ });
+ try {
+  await client.connect(transport);
+  assert.equal(client.getServerVersion().version, packageInfo.version);
+  const { tools } = await client.listTools();
+  const announcement = tools.find(tool => tool.name === 'publish_game_announcement');
+  assert.ok(announcement, 'actual announcement tool is registered');
+  const github = tools.find(tool => tool.name === 'update_github_game');
+  assert.match(github.description, /no uncommitted source changes/);
+  assert.match(github.description, /generated artifacts and publishing materials may remain/);
+  assert.match(github.description, /HEAD to exactly match its remote tip, not merely be an ancestor/);
+  assert.match(github.description, /publish the inspected commit SHA/);
+  const { prompts } = await client.listPrompts();
+  const multilingual = prompts.find(prompt => prompt.name === 'make_game_multilingual');
+  assert.match(multilingual.description, /keys\/phrases/);
+  let checkedAnnouncements = 0;
+  for (const prompt of prompts) {
+   const result = await client.getPrompt({ name: prompt.name,
+    ...(prompt.name === 'prepare_github_publish' ? { arguments: { repo: 'example/game' } } : {}),
+   });
+   const text = result.messages.map(message => message.content.type === 'text' ? message.content.text : '').join('\n');
+   if (['choose_publish_path', 'publish_local_artifacts', 'prepare_docker_publish', 'update_game'].includes(prompt.name)) {
+    assert.ok(text.includes(publishingFeaturePolicy.zh), `${prompt.name}: optional feature policy`);
+    const calls = [...text.matchAll(/publish_game_announcement\(\{([^}]+)\}\)/g)];
+    assert.equal(calls.length, 1, `${prompt.name}: one executable announcement example`);
+    const fields = calls[0][1].split(',').map(field => field.split(':')[0].trim());
+    for (const required of announcement.inputSchema.required)
+     assert.ok(fields.includes(required), `${prompt.name}: missing actual schema field ${required}`);
+    checkedAnnouncements++;
+   }
+   if (['choose_publish_path', 'publish_local_artifacts', 'prepare_docker_publish', 'update_game', 'make_game_multilingual'].includes(prompt.name))
+    assert.ok(text.includes(multilingualSourceGuidance.zh), `${prompt.name}: source workflow`);
+   if (prompt.name === 'add_cloud_saves') assert.ok(text.includes(cloudSaveOriginGuidance));
+  }
+  assert.equal(checkedAnnouncements, 4);
+ } finally {
+  await client.close();
+ }
+});
 
 test('publishing and updates explain mixed genres without overriding the author category', () => {
  for (const prompt of [automaticPublishPrompt, localPublishPrompt, dockerPublishPrompt, updateGamePrompt('game')]) {
@@ -35,7 +87,7 @@ test('normal publishing fills store metadata and real media even when multilingu
 test('all MCP prompt entries check actual runtime compatibility before preparing work', () => {
  for(const prompt of [automaticPublishPrompt,localPublishPrompt,dockerPublishPrompt,multilingualPrompt,cloudSavesPrompt,leaderboardsPrompt,updateGamePrompt('game'),githubPreparationPrompt('org/game',undefined,'check')]) {
   assert.ok(prompt.indexOf('serverInfo.version')<prompt.indexOf('connect_platform'));
-  assert.match(prompt,/get_publisher_info/);assert.match(prompt,/至少 0\.11\.0/);
+  assert.match(prompt,/get_publisher_info/);assert.match(prompt,/至少 0\.12\.1/);
   assert.match(prompt,/保留其他参数、环境配置和已有授权凭证/);
   assert.match(prompt,/重新加载 MCP 后复查实际运行版本/);assert.match(prompt,/不能重载时才请我重启/);
   assert.match(prompt,/更高且兼容的版本直接使用，不降级/);
@@ -96,7 +148,7 @@ test('author documentation describes confirmation and safe removal without autom
 test('package, lock and active install examples agree without rewriting historical changelog entries',async()=>{
  const lock=JSON.parse(await readFile(new URL('../package-lock.json',import.meta.url),'utf8'));
  const readme=await readFile(new URL('../README.md',import.meta.url),'utf8');
- assert.equal(packageInfo.version,'0.12.0');assert.equal(lock.version,packageInfo.version);assert.equal(lock.packages[''].version,packageInfo.version);
- const install=readme.split('## 使用')[0];assert.ok(install.includes('#v0.12.0'));assert.ok(!install.includes('#v0.11.0'));assert.ok(!install.includes('#v0.10.0'));assert.ok(!install.includes('#v0.9.0'));assert.doesNotMatch(readme,/本地包，尚未公开发布|当前仅准备本地安装包/);
- for(const heading of ['## v0.12.0','## v0.11.0','## v0.10.0','## v0.9.0','## v0.8.0','## v0.7.4','## v0.6.2'])assert.ok(readme.includes(heading));
+ assert.equal(packageInfo.version,'0.12.1');assert.equal(lock.version,packageInfo.version);assert.equal(lock.packages[''].version,packageInfo.version);
+ const install=readme.split('## 使用')[0];assert.ok(install.includes('#v0.12.1'));assert.ok(!install.includes('#v0.11.0'));assert.ok(!install.includes('#v0.10.0'));assert.ok(!install.includes('#v0.9.0'));assert.doesNotMatch(readme,/本地包，尚未公开发布|当前仅准备本地安装包/);
+ for(const heading of ['## v0.12.1','## v0.12.0','## v0.11.0','## v0.10.0','## v0.9.0','## v0.8.0','## v0.7.4','## v0.6.2'])assert.ok(readme.includes(heading));
 });

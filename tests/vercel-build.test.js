@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp,writeFile,readFile,mkdir,rm,symlink,readdir } from 'node:fs/promises';
+import { mkdtemp,writeFile,readFile,mkdir,rm,symlink,readdir,cp } from 'node:fs/promises';
 import { join,dirname,resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createServer } from 'node:http';
@@ -9,6 +9,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { buildVercelGame,convertRewrites } from '../src/vercel-build.js';
 import { inspectGame } from '../src/inspect.js';
+import { bundleVercelGame } from '../src/vercel-output.js';
 
 const require=createRequire(import.meta.url);
 const serverSource=`import {createServer} from 'node:http';
@@ -97,6 +98,90 @@ test('fixed nested req/res APIs work without rewrites and successful rebuild rep
   assert.equal(await readFile(join(root,'.1gp/vercel-output/config.json'),'utf8'),saved);
   assert.equal((await readdir(root)).some(name=>name.startsWith('.1gp-vercel-build-')),false);
   assert.equal((await readdir(join(root,'.1gp'))).includes('vercel-output.lock'),false);
+});
+
+test('managed output rejects changed source, translations and hidden build inputs before inspect or publish',async t=>{
+  const root=await fixture(t,{'public/index.html':'<p>built</p>','locales/en.json':'{"title":"Game"}','.env.production':'VITE_TITLE=game','.swcrc':'{}','.browserslistrc':'defaults'});
+  const options={frontendOutputDirectory:'public'};
+  await buildVercelGame(root,options);
+  const marker=JSON.parse(await readFile(join(root,'.1gp/vercel-output.owner.json'),'utf8'));
+  assert.equal(marker.version,2);assert.match(marker.sourceFingerprint,/^[a-f0-9]{64}$/);
+  assert.equal(JSON.stringify(marker).includes('VITE_TITLE'),false,'only a combined hash is stored');
+  await mkdir(join(root,'1gp-kit'),{recursive:true});await writeFile(join(root,'1gp-kit/cover.png'),'page-only change');
+  await mkdir(join(root,'dist'),{recursive:true});await writeFile(join(root,'dist/index.html'),'unrelated output');
+  assert.equal((await inspectGame(root)).ready,true,'promotion assets and unrelated generated output do not invalidate source');
+  for(const file of ['main.ts','api/index.ts','locales/en.json','.env.production','.swcrc','.browserslistrc']) {
+    const before=await readFile(join(root,file),'utf8');await writeFile(join(root,file),before+'\n');
+    const inspected=await inspectGame(root);assert.equal(inspected.code,'VERCEL_OUTPUT_REQUIRED',file);assert.match(inspected.reason,/重新调用 build_vercel_game/);
+    await assert.rejects(()=>bundleVercelGame(root),/VERCEL_OUTPUT_REQUIRED.*build_vercel_game/);
+    await assert.rejects(()=>bundleVercelGame(root,{deploymentTarget:'vercel',vercelOutputDirectory:'.1gp/vercel-output'}),/VERCEL_OUTPUT_REQUIRED/);
+    await writeFile(join(root,file),before);assert.equal((await inspectGame(root)).ready,true);
+  }
+  await writeFile(join(root,'new-level.json'),'[1,2]');assert.equal((await inspectGame(root)).code,'VERCEL_OUTPUT_REQUIRED');
+  await buildVercelGame(root,options);assert.equal((await inspectGame(root)).ready,true,'a successful rebuild refreshes the fingerprint');
+  await rm(join(root,'new-level.json'));assert.equal((await inspectGame(root)).code,'VERCEL_OUTPUT_REQUIRED','removed source also invalidates output');
+});
+
+test('legacy managed markers require a rebuild while explicit third-party prebuilt output keeps its semantics',async t=>{
+  const root=await fixture(t,{'public/index.html':'<p>built</p>'});await buildVercelGame(root,{frontendOutputDirectory:'public'});
+  const markerPath=join(root,'.1gp/vercel-output.owner.json'),marker=JSON.parse(await readFile(markerPath,'utf8'));
+  await writeFile(markerPath,JSON.stringify({tool:marker.tool,version:1,projectId:marker.projectId}));
+  assert.equal((await inspectGame(root)).code,'VERCEL_OUTPUT_REQUIRED');
+  await assert.rejects(()=>bundleVercelGame(root,{vercelOutputDirectory:'.1gp/vercel-output'}),/没有源码指纹.*build_vercel_game/);
+  await cp(join(root,'.1gp/vercel-output'),join(root,'third-party-output'),{recursive:true});
+  await writeFile(join(root,'main.ts'),'console.log("changed after third-party export")');
+  const explicit={deploymentTarget:'vercel',vercelOutputDirectory:'third-party-output'};
+  assert.equal((await inspectGame(root,explicit)).ready,true);
+  assert.equal((await bundleVercelGame(root,explicit)).functionCount,2);
+  await cp(join(root,'third-party-output'),join(root,'.vercel/output'),{recursive:true});
+  assert.equal((await inspectGame(root)).ready,true,'ordinary .vercel/output is still an explicit prebuilt contract');
+});
+
+test('prebuilt frontend files are fingerprinted even in a normally excluded build directory',async t=>{
+  const root=await fixture(t,{'dist/index.html':'<p>existing export</p>'});
+  await buildVercelGame(root,{frontendOutputDirectory:'dist'});assert.equal((await inspectGame(root)).ready,true);
+  await writeFile(join(root,'dist/index.html'),'<p>new export</p>');
+  assert.equal((await inspectGame(root)).code,'VERCEL_OUTPUT_REQUIRED');
+});
+
+test('reserved managed output fails closed when its owner marker is missing or invalid',async t=>{
+  const root=await fixture(t,{'public/index.html':'<p>built</p>'});await buildVercelGame(root,{frontendOutputDirectory:'public'});
+  const marker=join(root,'.1gp/vercel-output.owner.json'),saved=JSON.parse(await readFile(marker,'utf8'));
+  await writeFile(join(root,'api/index.ts'),'export default function(_req:any,res:any){res.end("changed source");}');
+  const selected={deploymentTarget:'vercel',vercelOutputDirectory:'.1gp/vercel-output'};
+  for(const replacement of [null,'not json',JSON.stringify({...saved,projectId:'another-project'})]) {
+    if(replacement===null)await rm(marker);else await writeFile(marker,replacement);
+    const result=await inspectGame(root,selected);assert.equal(result.code,'VERCEL_OUTPUT_REQUIRED');assert.notEqual(result.ready,true);
+    await assert.rejects(()=>bundleVercelGame(root,selected),/VERCEL_OUTPUT_REQUIRED.*build_vercel_game/);
+  }
+  if(await readFile(join(root,'.1gp/VERCEL-OUTPUT/config.json'),'utf8').catch(()=>null)) {
+    assert.equal((await inspectGame(root,{vercelOutputDirectory:'.1gp/VERCEL-OUTPUT'})).code,'VERCEL_OUTPUT_REQUIRED','a case-insensitive path alias cannot bypass the reserved-directory check');
+  }
+  await cp(join(root,'.1gp/vercel-output'),join(root,'third-party-output'),{recursive:true});
+  assert.equal((await inspectGame(root,{vercelOutputDirectory:'third-party-output'})).ready,true,'the reserved-path rule does not change third-party prebuilt output');
+});
+
+test('source changes during construction preserve previous output and its fingerprint',async t=>{
+  const root=await fixture(t,{'public/index.html':'<p>previous output</p>'});await buildVercelGame(root,{frontendOutputDirectory:'public'});
+  const output=join(root,'.1gp/vercel-output/static/index.html'),marker=join(root,'.1gp/vercel-output.owner.json');
+  const previousOutput=await readFile(output,'utf8'),previousMarker=await readFile(marker,'utf8');
+  await writeFile(join(root,'package.json'),JSON.stringify({type:'module',scripts:{build:'node build.mjs'},devDependencies:{vite:'8.3.4'}}));
+  await writeFile(join(root,'build.mjs'),`import{writeFileSync}from'node:fs';writeFileSync('public/index.html','<p>new output</p>');writeFileSync('main.ts','console.log("source changed during build")');`);
+  await assert.rejects(()=>buildVercelGame(root,{frontendOutputDirectory:'public',buildScript:'build'}),/LOCAL_BUILD_FAILED: 构建期间源码/);
+  assert.equal(await readFile(output,'utf8'),previousOutput);assert.equal(await readFile(marker,'utf8'),previousMarker);
+  assert.equal((await readdir(root)).some(name=>name.startsWith('.1gp-vercel-build-')),false);
+  assert.equal((await readdir(join(root,'.1gp'))).includes('vercel-output.lock'),false);
+});
+
+test('a dedicated generated frontend directory does not invalidate its own successful build',async t=>{
+  const root=await fixture(t,{
+    'package.json':JSON.stringify({type:'module',scripts:{build:'node build.mjs'}}),
+    'build.mjs':`import{mkdirSync,writeFileSync}from'node:fs';mkdirSync('web-export',{recursive:true});writeFileSync('web-export/index.html','<p>generated frontend</p>');`,
+    'vercel.json':'{}'
+  });
+  await buildVercelGame(root,{frontendOutputDirectory:'web-export',buildScript:'build'});
+  assert.equal((await inspectGame(root)).ready,true);
+  assert.equal((await bundleVercelGame(root)).functionCount,2);
 });
 
 test('unsupported config, dynamic API paths and import.meta never silently produce incomplete games',async t=>{

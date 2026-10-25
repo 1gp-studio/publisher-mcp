@@ -40,6 +40,21 @@ test('release comparison excludes the top-level promotion kit before size checks
  assert.deepEqual(compareSources(withKit.sourceFiles,after.sourceFiles),{baselineAvailable:true,added:[],changed:['levels/1gp-kit/level.json'],removed:[]});
 });
 
+test('release comparison includes hidden build inputs but excludes credentials and hidden or generated trees',async t=>{
+ const dir=await mkdtemp(join(tmpdir(),'release-config-'));t.after(()=>rm(dir,{recursive:true,force:true}));
+ const put=async(path,content)=>{const parts=path.split('/');await mkdir(join(dir,...parts.slice(0,-1)),{recursive:true});await writeFile(join(dir,path),content);};
+ const configs=['.babelrc','.browserslistrc','.swcrc','packages/web/.babelrc.json','packages/web/.postcssrc.cjs'];
+ for(const path of configs)await put(path,'original config');
+ for(const path of ['.env','.env.production','.npmrc','.yarnrc.yml','.config/.swcrc','dist/.babelrc','node_modules/pkg/.babelrc','secrets/.babelrc','src/.babelrc/private.json','1gp-kit/.swcrc'])
+  await put(path,'PRIVATE_TEST_CREDENTIAL');
+ const before=await sourceSnapshot(dir);
+ assert.deepEqual(Object.keys(before.sourceFiles).sort(),configs.sort());
+ assert.doesNotMatch(JSON.stringify(before),/PRIVATE_TEST_CREDENTIAL|\.env|\.npmrc|\.yarnrc|private\.json/);
+ await put('.swcrc','changed config');await rm(join(dir,'.browserslistrc'));
+ const after=await sourceSnapshot(dir);
+ assert.deepEqual(compareSources(before.sourceFiles,after.sourceFiles),{baselineAvailable:true,added:[],changed:['.swcrc'],removed:['.browserslistrc']});
+});
+
 test('legacy source manifests containing promotion kits do not create false code releases',()=>{
  const previous={'game.js':'same','1gp-kit/old.png':'old','1gp-kit/game.json':'before','1GP-KIT\\clip.mp4':'large','levels/1gp-kit/data.json':'before'};
  const current={'game.js':'same','1gp-kit/new.png':'new','1gp-kit/game.json':'after','levels/1gp-kit/data.json':'after'};
