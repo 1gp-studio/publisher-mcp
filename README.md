@@ -19,7 +19,7 @@
 ```toml
 [mcp_servers.onegp]
 command = "npx"
-args = ["--yes", "github:1gp-studio/publisher-mcp#v0.13.0"]
+args = ["--yes", "github:1gp-studio/publisher-mcp#v0.14.0"]
 startup_timeout_sec = 60
 tool_timeout_sec = 600
 ```
@@ -33,7 +33,7 @@ tool_timeout_sec = 600
 在终端运行一次（`--scope user` 对你本人的所有项目生效）：
 
 ```sh
-claude mcp add onegp --scope user -- npx --yes github:1gp-studio/publisher-mcp#v0.13.0
+claude mcp add onegp --scope user -- npx --yes github:1gp-studio/publisher-mcp#v0.14.0
 ```
 
 已经装过时，用 `claude mcp list` 确认当前生效的配置，只更新其中固定的包版本；保留既有参数和环境配置，不删除 AIWANNA 的授权凭证。上面的命令用于首次安装，不需要每次发布都重新添加。
@@ -239,6 +239,15 @@ MCP **负责检查、上传和保存，不内置浏览器截图、录屏或图�
 平台目前限制全站同时 2 个构建、每个账号最多 50 个作品，不设每日次数限制。账号邮箱验证由 Supabase 负责；平台管理员必须配置生产邮件服务，才能支持组织外用户收取登录邮件。AIWANNA 托管团队的 Vercel 套餐及运行限制仍适用；不占用用户个人 Vercel 账号。GitHub 来源继续遵守仓库授权与构建限制。
 
 开发时可使用 `ONEGP_PLATFORM_URL` 指向另一 HTTPS 平台，或本机 HTTP localhost/127.0.0.1；凭证按平台分别保存。测试运行 `npm test`，包括真实 MCP stdio 客户端集成测试。
+
+## v0.14.0：评论建议完成后自动同步进度
+
+- 新增 `read_comment_proposal({commentId})`：读取当前作者名下这条建议的游戏、进度和 `revision`。返回的 `platformOrigin` 来自当前连接配置，先与任务中的平台及游戏核对。
+- 新增 `update_comment_proposal({commentId,status,previewUrl,note,expectedRevision})`：通过后台接口同步进度、独立试玩链接和公开说明，复用现有 `connect_platform` 授权；不会发布游戏或另发评论。`get_publisher_info` 新增 `comment-proposal-progress` 能力。
+- 作者把网站生成的任务交给 AI 时，一并授权为这条建议回写实际进度。完成并验证、有可用的独立 HTTPS 试玩版时，写 `testing`（作者邀请试玩）；只有本地修改时使用 `in_progress`（作者开发中），不得降低已有更后面的状态。只有另行获准正式发布、发布成功且验证包含本次修改后，才写 `released`（作者已完成更新）。
+- 开始工作前保留读取的 `revision`，回写时作为 `expectedRevision`。作者期间修改或移除进度后，旧任务收到 `PROPOSAL_CONFLICT`，应读取并说明变化，不能自动用新版本号强行覆盖。相同内容重试不重复通知；结果不明时先读回核实。
+- `note` 最多 1000 字，对玩家公开，不包含凭证、私有路径或内部日志。工具未安装、账号未连接或回写失败时，继续能完成的工作，并明确报告尚未同步及手动恢复信息。
+- 需要先执行平台迁移 `202610260003_comment_proposal_callback.sql` 并部署配套接口 `/api/comments/{commentId}/proposal`，再发布本 MCP 标签。作者升级并重新加载后，可用 `get_publisher_info` 验证实际运行版本和能力；已有发布能力与授权保持兼容。
 
 ## v0.13.0：版本记录、帖子和制作信息可以改
 

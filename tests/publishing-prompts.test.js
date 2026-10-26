@@ -148,7 +148,7 @@ test('author documentation describes confirmation and safe removal without autom
 test('package, lock and active install examples agree without rewriting historical changelog entries',async()=>{
  const lock=JSON.parse(await readFile(new URL('../package-lock.json',import.meta.url),'utf8'));
  const readme=await readFile(new URL('../README.md',import.meta.url),'utf8');
- assert.equal(packageInfo.version,'0.13.0');assert.equal(lock.version,packageInfo.version);assert.equal(lock.packages[''].version,packageInfo.version);
- const install=readme.split('## 使用')[0];assert.ok(install.includes('#v0.13.0'));assert.ok(!install.includes('#v0.12.1'));assert.ok(!install.includes('#v0.11.0'));assert.ok(!install.includes('#v0.10.0'));assert.ok(!install.includes('#v0.9.0'));assert.doesNotMatch(readme,/本地包，尚未公开发布|当前仅准备本地安装包/);
- for(const heading of ['## v0.13.0','## v0.12.1','## v0.12.0','## v0.11.0','## v0.10.0','## v0.9.0','## v0.8.0','## v0.7.4','## v0.6.2'])assert.ok(readme.includes(heading));
+ assert.equal(packageInfo.version,'0.14.0');assert.equal(lock.version,packageInfo.version);assert.equal(lock.packages[''].version,packageInfo.version);
+ const install=readme.split('## 使用')[0];assert.ok(install.includes('#v0.14.0'));assert.ok(!install.includes('#v0.13.0'));assert.ok(!install.includes('#v0.12.1'));assert.ok(!install.includes('#v0.11.0'));assert.ok(!install.includes('#v0.10.0'));assert.ok(!install.includes('#v0.9.0'));assert.doesNotMatch(readme,/本地包，尚未公开发布|当前仅准备本地安装包/);
+ for(const heading of ['## v0.14.0','## v0.13.0','## v0.12.1','## v0.12.0','## v0.11.0','## v0.10.0','## v0.9.0','## v0.8.0','## v0.7.4','## v0.6.2'])assert.ok(readme.includes(heading));
 });

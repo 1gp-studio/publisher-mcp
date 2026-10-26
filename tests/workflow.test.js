@@ -331,7 +331,7 @@ test('runtime version and materials/announcement contracts are exposed through t
     { game: { id: gameId, slug: 'owned-game' }, original: { locale: 'zh' }, languages: [], covers: {}, ok: true, filled: { titles: ['ja'], descriptions: [] }, skipped: {} } }));
   const info = parsed(await f.client.callTool({ name: 'get_publisher_info', arguments: {} }));
   assert.equal(info.version, f.client.getServerVersion().version);
-  assert.ok(info.capabilities.includes('title-overlay-covers')); assert.equal(info.upgrade.automatic, false);
+  assert.ok(info.capabilities.includes('title-overlay-covers')); assert.ok(info.capabilities.includes('comment-proposal-progress')); assert.equal(info.upgrade.automatic, false);
   assert.equal(f.requests.length, 0);
   assert.equal((await f.client.callTool({ name: 'get_game_materials', arguments: { gameSlug: 'owned-game' } })).isError, false);
   const filled = await f.client.callTool({ name: 'set_game_details', arguments: { gameSlug: 'owned-game', titles: { ja: 'ゲーム' }, fillMissing: true } });
