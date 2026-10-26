@@ -213,6 +213,23 @@ export async function getGameUpdates(platform, gameSlug, { cursor } = {}) {
   return { gameSlug, updates: data.updates.map(({ reference, version, title, notes, createdAt }) => ({ reference, version, title, notes, createdAt })), nextCursor: data.nextCursor };
 }
 
+/** Change the title and notes of one author-selected version record; the version number stays. */
+export async function editGameUpdate(platform, gameSlug, { reference, title, notes, approved } = {}) {
+  if (approved !== true) return failure('APPROVAL_REQUIRED', '先把改好的完整标题和说明给作者看，作者认可后再保存。');
+  if (!slug(gameSlug) || !validReference(reference)) return failure('INVALID_REQUEST', '请使用 get_game_updates 返回的游戏和原始 reference，不要猜测编号。');
+  if (typeof title !== 'string' || title.trim().length > 120 || typeof notes !== 'string' || notes.trim().length > 4000) return failure('INVALID_REQUEST', '标题最多 120 字，说明最多 4000 字。');
+  const token = await platform.token?.();
+  if (!token) return failure('AUTH_REQUIRED', '请先连接 AIWANNA 账号。');
+  if (await currentToken(platform) !== token) return historyAccountChanged();
+  let data;
+  try { data = await platform.request('/api/developer/game-updates', { method: 'PATCH', token, body: { gameSlug, reference, title: title.trim(), notes: notes.trim(), approved: true } }); }
+  catch { return failure('UPDATE_STATUS_UNKNOWN', '保存结果不明；用 get_game_updates 查看后，只对同一 reference 重试相同内容。', { gameSlug, reference }); }
+  if (data?.error) return data;
+  if (!record(data) || data.gameSlug !== gameSlug || data.reference !== reference || data.saved !== true) return updateHistoryError();
+  const result = { gameSlug, reference, saved: true };
+  return await currentToken(platform) !== token ? { ...result, warning: historyAccountChanged() } : result;
+}
+
 /** Remove only an author-selected public update. Never deletes a build, game or deployment. */
 export async function deleteGameUpdate(platform, gameSlug, { reference, approved } = {}) {
   if (approved !== true) return failure('APPROVAL_REQUIRED', '只删除作者明确指定的更新记录；已有相同删除指令可直接沿用。');

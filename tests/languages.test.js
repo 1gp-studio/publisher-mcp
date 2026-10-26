@@ -116,3 +116,16 @@ test('game details send names and descriptions per language in one request',asyn
  const calls=[];await setGameDetails({request:async(path,options)=>{calls.push([path,options]);return {ok:true};}},'my-game',{titles:{ja:'猫'},descriptions:{ja:'釣りをする猫'}});
  assert.deepEqual(calls,[['/api/developer/language-files/my-game',{method:'PATCH',body:{titles:{ja:'猫'},descriptions:{ja:'釣りをする猫'}}}]]);
 });
+test('maker details save only the given fields, alone or after names',async()=>{
+ const { setGameDetails }=await import('../src/languages.js');
+ const calls=[];const platform={request:async(path,options)=>{calls.push([path,options]);return {ok:true};}};
+ assert.deepEqual(await setGameDetails(platform,'my-game',{maker:{tools:['Claude Code'],orientation:'portrait'}}),{ok:true,maker:{saved:true}});
+ assert.deepEqual(calls,[['/api/games/my-game/details',{method:'POST',body:{makerChanges:{tools:['Claude Code'],orientation:'portrait'}}}]]);
+ calls.length=0;
+ await setGameDetails(platform,'my-game',{titles:{ja:'猫'},maker:{session:'long'}});
+ assert.deepEqual(calls.map(([path])=>path),['/api/developer/language-files/my-game','/api/games/my-game/details']);
+ const failed=await setGameDetails({request:async path=>path.includes('details')?{error:'只能修改自己的游戏信息。'}:{ok:true}},'my-game',{titles:{ja:'猫'},maker:{session:'long'}});
+ assert.deepEqual(failed.maker,{saved:false,error:'只能修改自己的游戏信息。'});
+ const stopped=[];assert.equal((await setGameDetails({request:async path=>{stopped.push(path);return {error:'bad'};}},'my-game',{titles:{ja:''},maker:{session:'long'}})).error,'bad');
+ assert.equal(stopped.length,1,'a failed name change does not go on to the maker details');
+});

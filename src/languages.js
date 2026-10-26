@@ -175,6 +175,12 @@ export async function gameTextStatus(platform,gameSlug,{use='keys'}={}){
   if(!data||typeof data!=='object'||!Array.isArray(data.status)||data.status.some(item=>!item||typeof item!=='object'||!supportedGameLanguages.includes(item.locale)||typeof item.state!=='string'))return {error:'平台返回异常状态，请稍后查询。',code:'PLATFORM_ERROR'};
   return {platformTranslation:data.engine??null,status:(data.status??[]).map(item=>({locale:item.locale,state:item.state,total:item.total,done:item.done,missing:item.missing,stale:item.stale,editedByCreator:item.edited}))};
 }
-export async function setGameDetails(platform,gameSlug,{titles,descriptions,languages}){
-  return platform.request(`/api/developer/language-files/${encodeURIComponent(gameSlug)}`,{method:'PATCH',body:{...(titles?{titles}:{}),...(descriptions?{descriptions}:{}),...(languages?{languages}:{})}});
+export async function setGameDetails(platform,gameSlug,{titles,descriptions,languages,maker}){
+  const texts=()=>platform.request(`/api/developer/language-files/${encodeURIComponent(gameSlug)}`,{method:'PATCH',body:{...(titles?{titles}:{}),...(descriptions?{descriptions}:{}),...(languages?{languages}:{})}});
+  if(!maker)return texts();
+  // 制作信息 saves separately; only the given fields change.
+  const result=titles||descriptions||languages?await texts():{ok:true};
+  if(result?.error)return result;
+  const saved=await platform.request(`/api/games/${encodeURIComponent(gameSlug)}/details`,{method:'POST',body:{makerChanges:maker}});
+  return saved?.ok===true?{...result,maker:{saved:true}}:{...result,maker:{saved:false,error:saved?.error||'制作信息暂时没保存上，请重试。'}};
 }

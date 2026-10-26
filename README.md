@@ -19,7 +19,7 @@
 ```toml
 [mcp_servers.onegp]
 command = "npx"
-args = ["--yes", "github:1gp-studio/publisher-mcp#v0.12.1"]
+args = ["--yes", "github:1gp-studio/publisher-mcp#v0.13.0"]
 startup_timeout_sec = 60
 tool_timeout_sec = 600
 ```
@@ -33,7 +33,7 @@ tool_timeout_sec = 600
 在终端运行一次（`--scope user` 对你本人的所有项目生效）：
 
 ```sh
-claude mcp add onegp --scope user -- npx --yes github:1gp-studio/publisher-mcp#v0.12.1
+claude mcp add onegp --scope user -- npx --yes github:1gp-studio/publisher-mcp#v0.13.0
 ```
 
 已经装过时，用 `claude mcp list` 确认当前生效的配置，只更新其中固定的包版本；保留既有参数和环境配置，不删除 AIWANNA 的授权凭证。上面的命令用于首次安装，不需要每次发布都重新添加。
@@ -61,7 +61,7 @@ claude mcp add onegp --scope user -- npx --yes github:1gp-studio/publisher-mcp#v
 
 同一次任务的中间部署只记录在作者的构建历史，最终部署和功能验证完成、作者认可最终说明后，才公开一条合并公告。未确认或暂缓发布时保持待确认；不能为了收尾新建更新组或再部署一次游戏。新版平台也不会替未接入更新组的旧客户端自动生成公开版本公告或社区帖子。
 
-作者要求删除旧版本公告时，先 `get_game_updates({gameSlug})`，按版本、日期和内容核对真实 `reference`；更早记录使用返回的 `nextCursor`。再调用 `delete_game_update({gameSlug,reference,approved:true})`。明确删除同一条的作者指令已经是授权，无需重复确认；不猜编号、不擅自批量清空。删除会移除这条公开版本公告及对应更新帖，保留构建历史、部署产物、在线版本、回退能力和玩家数据。结果不明先查询同一游戏，只重试同一 `reference`；已删除公告不会重建。
+游戏页「版本更新」跟着「管理版本」走：每个版本号一条，默认显示。作者要改某条的文字时，先 `get_game_updates` 找到 `reference`，把完整新标题和说明给作者看，认可后 `edit_game_update({gameSlug,reference,title,notes,approved:true})`。作者要求删除（隐藏）旧版本时，先 `get_game_updates({gameSlug})`，按版本、日期和内容核对真实 `reference`；更早记录使用返回的 `nextCursor`。再调用 `delete_game_update({gameSlug,reference,approved:true})`。明确删除同一条的作者指令已经是授权，无需重复确认；不猜编号、不擅自批量清空。删除会移除这条公开版本公告及对应更新帖，保留构建历史、部署产物、在线版本、回退能力和玩家数据。结果不明先查询同一游戏，只重试同一 `reference`；已删除公告不会重建。
 
 ## 版本号与更新说明（v0.5.0）
 
@@ -173,9 +173,12 @@ Godot 也使用同一个 `gameSlug` 参数，不需要 `output_directory`。平�
 | 工具 | 用途 |
 | --- | --- |
 | prepare_game(project_directory, gameSlug?, docker_project?, features?, update_id?, new_update?) | 统一准备：识别游戏、沿用渠道、版本差异、构建/语言检查和可选功能；记住作者明确选择，不自动启用 |
-| complete_game_update(project_directory, update_id, title, notes, approved:true) | 作者认可具体最终内容、最终 ready 并完成验证后，公开一条合并公告；未确认保留草稿，首发或私有游戏不发更新帖，失败只重试同组同内容 |
+| complete_game_update(project_directory, update_id, title, notes, approved:true) | 作者认可具体最终内容、最终 ready 并完成验证后，公开一条合并公告；未确认保留草稿，首发不发更新帖，首发部署的版本标题和说明就是游戏页第一条版本记录（作者可在「管理版本」里改），私有游戏不公开，失败只重试同组同内容 |
 | get_game_updates(gameSlug, cursor?) | 查询自己游戏的公开版本公告，返回实际 reference、版本、标题、说明、日期和 nextCursor |
-| delete_game_update(gameSlug, reference, approved:true) | 删除作者指定的公开版本公告及关联更新帖；保留构建、在线版本和回退能力，重复删除幂等 |
+| get_game_posts(gameSlug) | 读作者自己关于这个游戏的帖子（首发帖、更新帖、网站上发的），给出 postId、标题、正文和链接 |
+| edit_game_post(gameSlug, postId, title, body, approved:true) | 改一篇已发出的帖子的标题和正文；先给作者看完整新内容，认可后保存；图片、评论、点赞保留 |
+| edit_game_update(gameSlug, reference, title, notes, approved:true) | 改游戏页「版本更新」里一条记录的标题和说明（版本号不变）；先给作者看完整新内容，认可后保存 |
+| delete_game_update(gameSlug, reference, approved:true) | 从游戏页隐藏作者指定的版本（同一版本号的几次部署一起）及关联更新帖，作者可在「管理版本」重新打开；保留构建、在线版本和回退能力，重复操作幂等 |
 | get_game_integrations(gameSlug, feature?, boardId?) | 读取自己游戏的云存档/榜单配置，可获取带真实 ID 与玩家平台 origin 的专属接入说明 |
 | configure_cloud_saves(gameSlug, enabled, schemaVersion) | 作者选择后设置云存档，返回专属说明；不读取玩家存档、不修改游戏代码 |
 | configure_leaderboard(gameSlug, configuration) | 创建或更新榜单；创建使用稳定 key 幂等重试，更新保留既有成绩与计分规则 |
@@ -236,6 +239,15 @@ MCP **负责检查、上传和保存，不内置浏览器截图、录屏或图�
 平台目前限制全站同时 2 个构建、每个账号最多 50 个作品，不设每日次数限制。账号邮箱验证由 Supabase 负责；平台管理员必须配置生产邮件服务，才能支持组织外用户收取登录邮件。AIWANNA 托管团队的 Vercel 套餐及运行限制仍适用；不占用用户个人 Vercel 账号。GitHub 来源继续遵守仓库授权与构建限制。
 
 开发时可使用 `ONEGP_PLATFORM_URL` 指向另一 HTTPS 平台，或本机 HTTP localhost/127.0.0.1；凭证按平台分别保存。测试运行 `npm test`，包括真实 MCP stdio 客户端集成测试。
+
+## v0.13.0：版本记录、帖子和制作信息可以改
+
+- 游戏页「版本更新」跟平台「管理版本」同步：每个版本号一条，默认显示，作者可在「管理版本」逐个版本隐藏或重新显示。`complete_game_update` 收尾时，作者认可的标题和说明写到最终版本上，同组的中间推送自动隐藏。首发部署的版本标题和说明就是游戏页第一条版本记录。
+- 新增 `edit_game_update`：改一条版本记录的标题和说明（版本号不变）。
+- 新增 `get_game_posts`、`edit_game_post`：读作者自己关于这个游戏的帖子，改已发出帖子的标题和正文；图片、评论、点赞保留。
+- `set_game_details` 新增 `maker`：AI 工具、屏幕、一局多久、制作笔记、开源，只改传入的字段；`get_game_materials` 新增 `maker` 返回当前值。开源只按作者明确选择设置。
+- `delete_game_update` 改为从游戏页隐藏整个版本（同一版本号的几次部署），作者可在「管理版本」重新显示。
+- `get_publisher_info` 新增 `version-record-edit`、`post-edit`、`maker-details` 能力。需配套平台迁移 `202610260002_versions_follow_deployments.sql` 和对应网站部署，均已上线；0.12.1 仍可使用，只是没有这些新工具。
 
 ## v0.12.1：发布内容校验与作者文案保护
 
