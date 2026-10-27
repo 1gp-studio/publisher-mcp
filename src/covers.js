@@ -1,13 +1,10 @@
-import { constants } from 'node:fs';
-import { lstat, open, realpath } from 'node:fs/promises';
-import { resolve, relative, isAbsolute, extname, basename, dirname, join, parse, sep } from 'node:path';
+import { lstat, realpath } from 'node:fs/promises';
+import { resolve, extname, basename, join, parse, isAbsolute, sep } from 'node:path';
+import { snapshot } from './media.js';
 
 // Covers per language (the edit page's 其他语言的封面, mock C45), through the same platform API:
 // a base picture without text, a language's own cover, and per language main / gen (the base with
 // the game's name in that language) / special, plus where the name goes.
-const types = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp' };
-const maxBytes = 2 * 1024 * 1024;
-const outside = path => path === '..' || path.startsWith(`..${sep}`) || isAbsolute(path);
 async function plainDirectory(path) {
   const root = parse(path).root;
   let current = root;
@@ -17,43 +14,18 @@ async function plainDirectory(path) {
     if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error('图片目录不能经过符号链接或目录联接。');
   }
 }
-const sameFile = (left, right) => left.dev === right.dev && left.ino === right.ino;
-const regularPicture = stat => stat.isFile() && !stat.isSymbolicLink() && stat.nlink === 1 && stat.size > 0 && stat.size <= maxBytes;
+// Read safely and compress like the main cover (media.js): large captures fit the 2 MB upload.
 async function picture(directory, path) {
-  const full = resolve(directory, path), inside = relative(directory, full);
-  if (outside(inside)) throw new Error(`图片必须在项目目录里：${path}`);
-  await plainDirectory(dirname(full));
-  const stat = await lstat(full), type = types[extname(full).toLowerCase()];
-  if (!regularPicture(stat) || !type) throw new Error(`${path} 要是项目内非链接的 PNG、JPG 或 WebP 普通图片，大小为 1 字节到 2 MB。`);
-  const canonical = await realpath(full);
-  if (outside(relative(directory, canonical))) throw new Error(`图片必须在项目目录里：${path}`);
-  const handle = await open(canonical, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0));
-  try {
-    const opened = await handle.stat();
-    if (!regularPicture(opened) || !sameFile(stat, opened)) throw new Error(`图片在读取时改变：${path}`);
-    // Bounded reads prevent a file that grows after lstat from bypassing the upload size limit.
-    const buffer = Buffer.alloc(maxBytes + 1);
-    let length = 0;
-    while (length < buffer.length) {
-      const { bytesRead } = await handle.read(buffer, length, buffer.length - length, length);
-      if (!bytesRead) break;
-      length += bytesRead;
-    }
-    const after = await handle.stat();
-    await plainDirectory(dirname(full));
-    const pathAfter = await lstat(full);
-    if (!regularPicture(after) || !regularPicture(pathAfter) || !sameFile(opened, pathAfter)
-      || after.size !== length || opened.size !== after.size || opened.mtimeMs !== after.mtimeMs || opened.ctimeMs !== after.ctimeMs
-      || outside(relative(directory, await realpath(full)))) throw new Error(`图片在读取时改变或超过 2 MB：${path}`);
-    return new File([buffer.subarray(0, length)], basename(full), { type });
-  } finally { await handle.close(); }
+  const { bytes } = await snapshot(directory, 'cover', path);
+  return new File([bytes], `${basename(path, extname(path))}.webp`, { type: 'image/webp' });
 }
 
 export async function setGameCovers(platform, projectDirectory, gameSlug, { base, special = {}, modes, position, fillMissing } = {}) {
   if (!isAbsolute(projectDirectory)) return { error: '请提供当前游戏项目的绝对路径。' };
   let directory;
   try { await plainDirectory(resolve(projectDirectory)); directory = await realpath(resolve(projectDirectory)); } catch { return { error: '无法安全读取项目目录（不能经过符号链接或目录联接）。' }; }
-  const path = `/api/games/${encodeURIComponent(gameSlug)}/covers`, uploaded = [];
+  // preserved: pictures the platform kept instead (fillMissing never replaces the author's own).
+  const path = `/api/games/${encodeURIComponent(gameSlug)}/covers`, uploaded = [], preserved = [];
   const token = typeof platform.token === 'function' ? await platform.token() : undefined;
   if (token === null || token === '') return { code: 'AUTH_REQUIRED', error: '请先运行 connect_platform，并由用户在浏览器确认授权。', uploaded };
   const changed = async () => token !== undefined && await platform.token() !== token;
@@ -77,7 +49,8 @@ export async function setGameCovers(platform, projectDirectory, gameSlug, { base
       if (!result || typeof result !== 'object' || Array.isArray(result)) return { code: 'PLATFORM_ERROR', error: '平台返回异常上传响应，请先查询封面状态。', uploaded, failed };
       if (result.error) return { ...result, uploaded, failed };
       if (typeof result.path !== 'string' || !result.path) return { code: 'PLATFORM_ERROR', error: '平台没有返回图片保存位置，请先查询封面状态。', uploaded, failed };
-      uploaded.push(target);
+      if (result.skipped === true) preserved.push({ target, reason: typeof result.reason === 'string' ? result.reason : 'AUTHOR_COVER_PRESERVED' });
+      else uploaded.push(target);
     }
     if (await changed()) return { ...changedError(), failed: modes || position ? 'settings' : 'account' };
     if (modes || position) {
@@ -90,7 +63,9 @@ export async function setGameCovers(platform, projectDirectory, gameSlug, { base
       if (await changed()) return { ...changedError(), failed: 'account', settingsSaved: true };
     }
   } catch (error) { return { error: error.message, uploaded, failed }; }
-  return { ...settingsResult, ok: true, uploaded, verificationRequired: true, message: settingsResult?.partial
+  return { ...settingsResult, ok: true, uploaded, ...(preserved.length ? { preserved } : {}), verificationRequired: true, message: preserved.length
+    ? `作者已有的图片保留未换：${preserved.map(item => item.target).join('、')}（fillMissing 只补缺）。不要告诉作者已换图。`
+    : settingsResult?.partial
     ? '已保存可以完成的封面设置；部分语言仍缺少必要物料，请查看 skipped 并补齐，尚未完成的预览可能仍回退主封面。'
     : '已处理提交的封面设置。请用 get_game_materials 查看实际模式并检查预览；保存成功不代表生成图片已验证。' };
 }

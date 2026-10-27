@@ -96,10 +96,13 @@ async function uploadPreview(platform, slug, file, token, unchanged) {
   return savedResult(completed, platform, 'preview');
 }
 
-/** Upload reviewed, real local materials. Creates no screenshots, artwork or fictitious footage. */
-export async function setGameMedia(platform, projectDirectory, gameSlug, { cover, screenshots = [], preview, fillMissing = true } = {}) {
+/** Upload reviewed, real local materials. Creates no screenshots, artwork or fictitious footage.
+ *  replaceCover: the author explicitly asked for this cover to replace the current main cover (the edit page's own
+ *  replace); without it the main cover, like the preview, is only filled when missing. */
+export async function setGameMedia(platform, projectDirectory, gameSlug, { cover, screenshots = [], preview, fillMissing = true, replaceCover } = {}) {
   if (typeof gameSlug !== 'string' || gameSlug.length > 200 || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(gameSlug)
     || fillMissing !== true || !Array.isArray(screenshots) || screenshots.length > 20 || !cover && !preview && !screenshots.length) return failure('INVALID_MEDIA', '请提供真实游戏标识及至少一份素材；截图最多 20 张，主封面和预览只补缺失。');
+  if (replaceCover !== undefined && (replaceCover !== true || !cover)) return failure('INVALID_MEDIA', 'replaceCover 只能为 true，并且要同时给出作者确认过的新主封面 cover。');
   const token = await platform.token?.();
   if (!token) return failure('AUTH_REQUIRED', '请先连接 AIWANNA 账号。');
   const unchanged = async () => await currentToken(platform) === token;
@@ -122,7 +125,7 @@ export async function setGameMedia(platform, projectDirectory, gameSlug, { cover
     for (const file of files) {
       active = file;
       if (!await unchanged()) return stop(accountChanged());
-      const path = `/api/games/${encodeURIComponent(gameSlug)}/${file.target === 'cover' ? 'cover?fillMissing=true' : 'screenshots'}`;
+      const path = `/api/games/${encodeURIComponent(gameSlug)}/${file.target === 'cover' ? replaceCover ? 'cover' : 'cover?fillMissing=true' : 'screenshots'}`;
       const raw = file.target === 'preview' ? await uploadPreview(platform, gameSlug, file, token, unchanged)
         : await platform.uploadBytes(path, file.bytes, { token, type: file.contentType, idempotencyKey: file.sha256 });
       const data = file.target === 'preview' ? raw : savedResult(raw, platform, file.target);
@@ -134,5 +137,6 @@ export async function setGameMedia(platform, projectDirectory, gameSlug, { cover
     }
   } catch (error) { return stop(failure('INVALID_MEDIA', error instanceof Error ? error.message : '无法安全读取或验证素材。')); }
   return { ok: true, partial: false, uploaded, skipped, verificationRequired: true,
-    message: '已处理提交的真实素材；已有作者封面和预览保留，截图只追加且相同内容不重复。请读取 get_game_materials，并实际查看主封面、截图和预览；上传成功不代表画面或玩法已验证。' };
+    message: (replaceCover ? '已按作者要求替换主封面；预览只补缺失，' : '已处理提交的真实素材；已有作者封面和预览保留，')
+      + '截图只追加且相同内容不重复。请读取 get_game_materials，并实际查看主封面、截图和预览；上传成功不代表画面或玩法已验证。' };
 }

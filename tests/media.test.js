@@ -199,3 +199,21 @@ test('media saved URLs accept exact official legacy and AIWANNA origins without 
     assert.equal((await setGameMedia(f.platform,f.project,'owned-game',{cover:'cover.png'})).code,'PLATFORM_ERROR',origin);
   }
 });
+
+test('replaceCover uploads the reviewed cover as the new main cover; it needs an explicit true and a cover', async t => {
+  const f = await fixture(t);
+  const replaced = await setGameMedia(f.platform, f.project, 'owned-game', { cover: 'cover.png', screenshots: ['shot.png'], replaceCover: true });
+  assert.equal(replaced.ok, true);
+  assert.equal(f.calls[0].path, '/api/games/owned-game/cover', 'Replacing omits fillMissing, as the edit page does');
+  assert.equal(f.calls[1].path, '/api/games/owned-game/screenshots', 'Screenshots still only append');
+  assert.deepEqual(replaced.uploaded.map(item => [item.target, item.created]), [['cover', true], ['screenshot', true]]);
+  assert.match(replaced.message, /替换主封面/);
+  const calls = f.calls.length;
+  for (const input of [{ replaceCover: true, screenshots: ['shot.png'] }, { cover: 'cover.png', replaceCover: false }, { cover: 'cover.png', replaceCover: 'yes' }]) {
+    const result = await setGameMedia(f.platform, f.project, 'owned-game', input);
+    assert.equal(result.code, 'INVALID_MEDIA'); assert.equal(f.calls.length, calls, 'Rejected before reading or uploading anything');
+  }
+  const kept = await setGameMedia(f.platform, f.project, 'owned-game', { cover: 'cover.png' });
+  assert.equal(f.calls.at(-1).path, '/api/games/owned-game/cover?fillMissing=true', 'Without replaceCover the main cover is only filled');
+  assert.equal(kept.ok, true);
+});

@@ -6,7 +6,7 @@
 
 需要 Node.js 24+、npm 和 Git，并且能访问 GitHub：首次安装由 npx 从 GitHub 下载本项目。游戏本身不需要 Git 仓库。这是标准的 stdio MCP 服务，任何 MCP 客户端都能使用。
 
-**只装一次，装在用户级。** 一份安装对你所有的游戏项目都有效，不要在每个游戏项目里各装一份，也不要在游戏目录里新建 `.mcp.json`。固定版本不会自行升级：先读取实际 MCP 握手 `serverInfo.version`，或调用 `get_publisher_info`；本流程需要 **0.11.0 或更高兼容版本**。低版本只更新当前客户端已有 AIWANNA 配置里的固定版本，保留其他参数、环境配置和授权凭证；更高兼容版本不降级。
+**只装一次，装在用户级。** 一份安装对你所有的游戏项目都有效，不要在每个游戏项目里各装一份，也不要在游戏目录里新建 `.mcp.json`。固定版本不会自行升级：先读取实际 MCP 握手 `serverInfo.version`，或调用 `get_publisher_info`；本流程需要 **0.12.1 或更高兼容版本**。低版本只更新当前客户端已有 AIWANNA 配置里的固定版本，保留其他参数、环境配置和授权凭证；更高兼容版本不降级。
 
 更新后重新加载 MCP，再核对实际运行版本和工具；客户端无法重载时才请用户重启。配置已经写成新版、工具名称已经存在，都不能证明旧进程已经升级。读不到版本时说明情况，不假定已经完成。
 
@@ -19,7 +19,7 @@
 ```toml
 [mcp_servers.onegp]
 command = "npx"
-args = ["--yes", "github:1gp-studio/publisher-mcp#v0.14.0"]
+args = ["--yes", "github:1gp-studio/publisher-mcp#v0.14.1"]
 startup_timeout_sec = 60
 tool_timeout_sec = 600
 ```
@@ -33,7 +33,7 @@ tool_timeout_sec = 600
 在终端运行一次（`--scope user` 对你本人的所有项目生效）：
 
 ```sh
-claude mcp add onegp --scope user -- npx --yes github:1gp-studio/publisher-mcp#v0.14.0
+claude mcp add onegp --scope user -- npx --yes github:1gp-studio/publisher-mcp#v0.14.1
 ```
 
 已经装过时，用 `claude mcp list` 确认当前生效的配置，只更新其中固定的包版本；保留既有参数和环境配置，不删除 AIWANNA 的授权凭证。上面的命令用于首次安装，不需要每次发布都重新添加。
@@ -193,7 +193,7 @@ Godot 也使用同一个 `gameSlug` 参数，不需要 `output_directory`。平�
 | find_my_game(project_directory, gameSlug?) | 按当前项目找到你自己的游戏；给了编号就核对它是不是这个项目的 |
 | validate_game_text(project_directory, original, translations, separators?) | 上传前检查译文：键名、占位符、换行、分隔符、长度和字体 |
 | set_game_covers(project_directory, gameSlug, base?, special?, modes?, position?) | 各语言封面：底图、专用封面、每种语言的选择和游戏名位置 |
-| set_game_media(project_directory, gameSlug, cover?, screenshots?, preview?, fillMissing?) | 上传已准备好的主封面、实机截图和预览；只补缺主封面/预览，截图追加并按内容去重，保留现有物料 |
+| set_game_media(project_directory, gameSlug, cover?, screenshots?, preview?, fillMissing?, replaceCover?) | 上传已准备好的主封面、实机截图和预览；只补缺主封面/预览，截图追加并按内容去重，保留现有物料；作者明确要求换主封面时传 `replaceCover:true` |
 | update_github_game(project_directory, gameSlug, release) | 更新从 GitHub 发布的游戏：确认这是游戏的仓库、改动已提交并推送到发布分支，再让平台从最新提交重新构建；不会替你推送 |
 | check_game_languages(project_directory) | 只读检查游戏有没有做多语言（语言文件、`?lang=`、浏览器语言、AIWANNA SDK），返回检测到的语言、下一步和接入约定 |
 | upload_game_text(project_directory, gameSlug, original?, translations?, use?) | 上传游戏自己的原始语言文件和你的 AI 翻好的各语言文件（`{"键名": "文字"}`），平台在 `/i18n/<游戏>/<语言>.json` 提供给玩家 |
@@ -239,6 +239,12 @@ MCP **负责检查、上传和保存，不内置浏览器截图、录屏或图�
 平台目前限制全站同时 2 个构建、每个账号最多 50 个作品，不设每日次数限制。账号邮箱验证由 Supabase 负责；平台管理员必须配置生产邮件服务，才能支持组织外用户收取登录邮件。AIWANNA 托管团队的 Vercel 套餐及运行限制仍适用；不占用用户个人 Vercel 账号。GitHub 来源继续遵守仓库授权与构建限制。
 
 开发时可使用 `ONEGP_PLATFORM_URL` 指向另一 HTTPS 平台，或本机 HTTP localhost/127.0.0.1；凭证按平台分别保存。测试运行 `npm test`，包括真实 MCP stdio 客户端集成测试。
+
+## v0.14.1：封面可以换，已有封面不被覆盖
+
+- `set_game_media` 新增 `replaceCover:true`：作者明确要求换主封面时，用作者看过的 `cover` 替换现有主封面，和网页「编辑」里替换封面走同一个平台接口；不传时主封面仍然只补缺失，预览和截图规则不变。`get_publisher_info` 新增 `main-cover-replace` 能力；平台接口早已支持，不需要迁移。
+- `set_game_covers` 跳过上传时返回 `preserved`，说明保留了哪些已有封面；上传前先压缩图片。
+- 平台提示词要求的最低版本改为 0.14.1，安装固定到 `#v0.14.1`。不需要迁移。
 
 ## v0.14.0：评论建议完成后自动同步进度
 
