@@ -19,7 +19,7 @@
 ```toml
 [mcp_servers.onegp]
 command = "npx"
-args = ["--yes", "github:1gp-studio/publisher-mcp#v0.14.1"]
+args = ["--yes", "github:1gp-studio/publisher-mcp#v0.15.0"]
 startup_timeout_sec = 60
 tool_timeout_sec = 600
 ```
@@ -33,7 +33,7 @@ tool_timeout_sec = 600
 在终端运行一次（`--scope user` 对你本人的所有项目生效）：
 
 ```sh
-claude mcp add onegp --scope user -- npx --yes github:1gp-studio/publisher-mcp#v0.14.1
+claude mcp add onegp --scope user -- npx --yes github:1gp-studio/publisher-mcp#v0.15.0
 ```
 
 已经装过时，用 `claude mcp list` 确认当前生效的配置，只更新其中固定的包版本；保留既有参数和环境配置，不删除 AIWANNA 的授权凭证。上面的命令用于首次安装，不需要每次发布都重新添加。
@@ -51,17 +51,17 @@ claude mcp add onegp --scope user -- npx --yes github:1gp-studio/publisher-mcp#v
 1. 告诉 AI（Codex / Claude Code）：**连接 AIWANNA 发布平台**。调用 `connect_platform` 后，用户本人打开返回的授权链接，登录并点击允许。对照页面与工具的客户端指纹。
 2. 打开游戏项目，告诉 AI：**检查当前游戏，支持的话发布到 AIWANNA，把试玩链接给我。**
 3. MCP 自动读取名字和介绍（Vite 项目读 package.json，Godot 项目读 project.godot）以及要上传的文件；未提供介绍时使用中性的默认介绍，不推断玩法。
-4. `prepare_game` 一次返回项目识别、原发布渠道、版本差异、构建检查、语言、已有可选功能、页面物料 `materials` 和常规物料清单 `promotion`。AI 阅读代码并试玩，补缺的分类、作者主语言标签、主封面、实机截图和短预览；即使不接多语言也检查这些项目。发布前只询问首次发布是否发社区公告，以 `features.announcement` 记住意向。多语言、云存档、排行榜沿用已有设置，作者主动要求时才接入，发布后按 `prepare_game.optionalFeatures` 提醒尚未使用的可选功能；复用已有授权和检查结果。
+4. `prepare_game` 一次返回项目识别、原发布渠道、版本差异、构建检查、语言、已有可选功能、页面物料 `materials` 和常规物料清单 `promotion`。AI 阅读代码并试玩，补缺的分类、作者主语言标签、主封面、制作信息和至少 3 张实机截图（首发需要）；预览可选，发布后问作者要不要做；即使不接多语言也检查这些项目。发布前不追问可选功能：多语言、云存档、排行榜沿用已有设置，作者主动要求时才接入，发布后按 `prepare_game.optionalFeatures` 提醒尚未使用的可选功能；复用已有授权和检查结果。
 5. 异步发布返回构建 ID 后调用 `wait_for_publish`。每次最多等 45 秒；pending 时继续同一任务，省略 build_id 可恢复当前账号最近任务。只有 ready 表示部署成功，仍需验证实际游戏。
-6. 把最终合并的版本公告 `title`、`notes` 给作者看；作者明确认可具体内容后才 `complete_game_update(..., approved:true)`。发布游戏、技术部署的授权不等于公告认可。同一内容已获明确认可就沿用，不重复询问；改动内容后重新确认。尚未认可时保留草稿和同一 `update_id`，不自动发公告。
+6. 更新收尾：主动问作者要不要把这版写进版本记录，附上拟好的标题 `title` 和说明 `notes`；作者同意后调用一次 `complete_game_update(..., approved:true)`，写进游戏页「版本更新」，不发帖。作者还没同意时保留草稿和同一 `update_id`。首发不用收尾，首发部署的标题和说明就是第一条版本记录。
+7. 发布或更新后主动问作者要不要再发一篇社区帖并附上草稿；作者任何时候要发帖（任何数量）都用 `create_game_post({kind,title,body,approved:true})`：先把完整标题、正文和图片给作者看，同意后再发。
+8. 截图、主封面、预览、各语言封面、名字简介、分类标签和制作信息以后都能按作者要求修改（`set_game_media` 的 `replaceCover` / `replacePreview` / `replaceScreenshots`、`edit_game_media`、`set_game_covers`、`set_game_details`）。
 
-## 版本公告确认与删除
+## 版本记录与删除
 
-先检查 `get_publisher_info` 的 `approved-update-announcements` 和 `update-history-delete` 能力。缺少能力时保留草稿，说明需要更新并重新加载 MCP；不能用旧工具或不带 `approved` 的请求绕过确认。
+同一次任务的中间部署只记录在作者的构建历史，作者同意最终标题和说明后合并成一条版本记录。作者还没同意时保持草稿；不能为了收尾新建更新组或再部署一次游戏。
 
-同一次任务的中间部署只记录在作者的构建历史，最终部署和功能验证完成、作者认可最终说明后，才公开一条合并公告。未确认或暂缓发布时保持待确认；不能为了收尾新建更新组或再部署一次游戏。新版平台也不会替未接入更新组的旧客户端自动生成公开版本公告或社区帖子。
-
-游戏页「版本更新」跟着「管理版本」走：每个版本号一条，默认显示。作者要改某条的文字时，先 `get_game_updates` 找到 `reference`，把完整新标题和说明给作者看，认可后 `edit_game_update({gameSlug,reference,title,notes,approved:true})`。作者要求删除（隐藏）旧版本时，先 `get_game_updates({gameSlug})`，按版本、日期和内容核对真实 `reference`；更早记录使用返回的 `nextCursor`。再调用 `delete_game_update({gameSlug,reference,approved:true})`。明确删除同一条的作者指令已经是授权，无需重复确认；不猜编号、不擅自批量清空。删除会移除这条公开版本公告及对应更新帖，保留构建历史、部署产物、在线版本、回退能力和玩家数据。结果不明先查询同一游戏，只重试同一 `reference`；已删除公告不会重建。
+游戏页「版本更新」跟着「管理版本」走：每个版本号一条，默认显示。作者要改某条的文字时，先 `get_game_updates` 找到 `reference`，把完整新标题和说明给作者看，认可后 `edit_game_update({gameSlug,reference,title,notes,approved:true})`。作者要求删除（隐藏）旧版本时，先 `get_game_updates({gameSlug})`，按版本、日期和内容核对真实 `reference`；更早记录使用返回的 `nextCursor`。再调用 `delete_game_update({gameSlug,reference,approved:true})`。明确删除同一条的作者指令已经是授权，无需重复确认；不猜编号、不擅自批量清空。删除会隐藏这条公开版本记录及对应更新帖（如有），保留构建历史、部署产物、在线版本、回退能力和玩家数据。结果不明先查询同一游戏，只重试同一 `reference`；已删除的记录不会重建。
 
 ## 版本号与更新说明（v0.5.0）
 
@@ -70,7 +70,7 @@ claude mcp add onegp --scope user -- npx --yes github:1gp-studio/publisher-mcp#v
 - 首发 `1.0.0`；大规模玩法重做或存档不兼容升主版本；新玩法/关卡升次版本；修复、平衡或纯资源变化升补丁版本。
 - 作者可以修改建议。所有发布工具需要 `release.updateId`，沿用 `prepare_game` 返回的真实 `updateId`；`release` 格式示例：`{"updateId":"从 prepare_game 返回的 UUID","version":"1.1.0","title":"新关卡","notes":"关卡：新增森林挑战。修复：解决结算卡住。","changeType":"minor"}`。实际内容必须来自当前项目，`changeType` 为 `major`、`minor`、`patch` 或 `assets`。
 - Docker 发布传入 `project_directory` 才能保存下一次比较的源码清单。只上传路径与 SHA-256 哈希，不上传源码正文；跳过隐藏文件、依赖、常见输出和凭证，比较上限为 1,000 文件、64 MiB。
-- 成功部署只保存构建记录；版本公告还需作者明确认可最终内容后才对玩家展示。所有构建尝试保留在作者历史中。作者可在历史页修改版本和说明，回退可用的旧 Vercel 部署或 Docker 镜像。回退不恢复玩家存档或外部数据；产物被云服务删除后不可恢复。外部链接不支持回退。
+- 更新的成功部署只保存构建记录；作者同意最终标题和说明、收尾后才成为玩家看到的版本记录。所有构建尝试保留在作者历史中。作者可在历史页修改版本和说明，回退可用的旧 Vercel 部署或 Docker 镜像。回退不恢复玩家存档或外部数据；产物被云服务删除后不可恢复。外部链接不支持回退。
 - 升级后重启客户端，重新加载工具。下方参数示例用于检查；调用发布时须另加 `release`。
 
 ## 完整游戏 Vercel 发布（v0.6.0）
@@ -168,15 +168,16 @@ Godot 也使用同一个 `gameSlug` 参数，不需要 `output_directory`。平�
 
 ## 工具
 
-当前提供 35 个工具；Docker 构建、上传、查询和发布工具见后文。
+当前提供 36 个工具；Docker 构建、上传、查询和发布工具见后文。
 
 | 工具 | 用途 |
 | --- | --- |
 | prepare_game(project_directory, gameSlug?, docker_project?, features?, update_id?, new_update?) | 统一准备：识别游戏、沿用渠道、版本差异、构建/语言检查和可选功能；记住作者明确选择，不自动启用 |
-| complete_game_update(project_directory, update_id, title, notes, approved:true) | 作者认可具体最终内容、最终 ready 并完成验证后，公开一条合并公告；未确认保留草稿，首发不发更新帖，首发部署的版本标题和说明就是游戏页第一条版本记录（作者可在「管理版本」里改），私有游戏不公开，失败只重试同组同内容 |
-| get_game_updates(gameSlug, cursor?) | 查询自己游戏的公开版本公告，返回实际 reference、版本、标题、说明、日期和 nextCursor |
+| complete_game_update(project_directory, update_id, title, notes, approved:true) | 最终部署 ready 并检查后，把作者同意的标题和说明写进游戏版本记录（游戏页「版本更新」、关注动态、更新榜），不发帖；首发不用收尾，首发部署的标题和说明就是第一条版本记录；失败只重试同组同内容 |
+| create_game_post(kind, title, body, gameSlug?, score?, images?, project_directory?, approved:true) | 作者要发帖时发一篇社区帖（攻略、晒战绩、开发日志、闲聊），任何时候、任何数量；先给作者看完整标题、正文和图片，同意后再发；图片是项目内相对路径 |
+| get_game_updates(gameSlug, cursor?) | 查询自己游戏的公开版本记录，返回实际 reference、版本、标题、说明、日期和 nextCursor |
 | get_game_posts(gameSlug) | 读作者自己关于这个游戏的帖子（首发帖、更新帖、网站上发的），给出 postId、标题、正文和链接 |
-| edit_game_post(gameSlug, postId, title, body, approved:true) | 改一篇已发出的帖子的标题和正文；先给作者看完整新内容，认可后保存；图片、评论、点赞保留 |
+| edit_game_post(gameSlug, postId, title, body, images?, project_directory?, approved:true) | 改一篇已发出的帖子的标题、正文和图片；先给作者看完整新内容，认可后保存；不传 images 时图片不变，评论、点赞保留 |
 | edit_game_update(gameSlug, reference, title, notes, approved:true) | 改游戏页「版本更新」里一条记录的标题和说明（版本号不变）；先给作者看完整新内容，认可后保存 |
 | delete_game_update(gameSlug, reference, approved:true) | 从游戏页隐藏作者指定的版本（同一版本号的几次部署一起）及关联更新帖，作者可在「管理版本」重新打开；保留构建、在线版本和回退能力，重复操作幂等 |
 | get_game_integrations(gameSlug, feature?, boardId?) | 读取自己游戏的云存档/榜单配置，可获取带真实 ID 与玩家平台 origin 的专属接入说明 |
@@ -193,7 +194,9 @@ Godot 也使用同一个 `gameSlug` 参数，不需要 `output_directory`。平�
 | find_my_game(project_directory, gameSlug?) | 按当前项目找到你自己的游戏；给了编号就核对它是不是这个项目的 |
 | validate_game_text(project_directory, original, translations, separators?) | 上传前检查译文：键名、占位符、换行、分隔符、长度和字体 |
 | set_game_covers(project_directory, gameSlug, base?, special?, modes?, position?) | 各语言封面：底图、专用封面、每种语言的选择和游戏名位置 |
-| set_game_media(project_directory, gameSlug, cover?, screenshots?, preview?, fillMissing?, replaceCover?) | 上传已准备好的主封面、实机截图和预览；只补缺主封面/预览，截图追加并按内容去重，保留现有物料；作者明确要求换主封面时传 `replaceCover:true` |
+| set_game_media(project_directory, gameSlug, cover?, screenshots?, preview?, fillMissing?, replaceCover?, replacePreview?) | 上传已准备好的主封面、实机截图和预览；只补缺主封面/预览，截图追加并按内容去重，保留现有物料；作者明确要求换主封面时传 `replaceCover:true` |
+| edit_game_media(gameSlug, removeScreenshots?, screenshotOrder?, removePreview?) | 作者明确要求时删除截图、调整截图顺序、撤下预览；截图 id 来自 get_game_materials。换截图 = set_game_media 传新图 + 这里删旧图并排序。 |
+| record_game_video(project_directory, director, root?, page?, size?, out?, arg?) | 用本机 Chrome/Edge 逐帧录宣传视频（≤5 MB，带声音）和截图（REC.shot），存进项目；拍什么由你的导演脚本决定。 |
 | update_github_game(project_directory, gameSlug, release) | 更新从 GitHub 发布的游戏：确认这是游戏的仓库、改动已提交并推送到发布分支，再让平台从最新提交重新构建；不会替你推送 |
 | check_game_languages(project_directory) | 只读检查游戏有没有做多语言（语言文件、`?lang=`、浏览器语言、AIWANNA SDK），返回检测到的语言、下一步和接入约定 |
 | upload_game_text(project_directory, gameSlug, original?, translations?, use?) | 上传游戏自己的原始语言文件和你的 AI 翻好的各语言文件（`{"键名": "文字"}`），平台在 `/i18n/<游戏>/<语言>.json` 提供给玩家 |
@@ -201,9 +204,9 @@ Godot 也使用同一个 `gameSlug` 参数，不需要 `output_directory`。平�
 | get_game_text_source(gameSlug, use?) | 只读自动来源配置、来源指纹、待审候选与翻译状态；prepare_game.textSources 已含两种模式 |
 | configure_game_text_source(gameSlug, enabled, locale, files, use?, excluded?, scan?) | 以当前 revision 保存设置，启用时默认扫描一次；不构建、不发布 |
 | approve_game_text_candidates(gameSlug, keys, expectedRevision, expectedFingerprint) | 仅批准逐项审查的短语候选，绑定 config.revision 和 source_fingerprint |
-| set_game_details(gameSlug, titles?, descriptions?, languages?, genre?, tags?, fillMissing?) | 游戏名、简介和支持的语言；fillMissing:true 还可补缺分类和作者主语言标签，保留已有内容 |
+| set_game_details(gameSlug, titles?, descriptions?, languages?, genre?, tags?, fillMissing?) | 游戏名、简介和支持的语言；fillMissing:true 还可补缺分类和作者主语言标签；不带 fillMissing 时，作者要求的 genre/tags 直接替换，保留已有内容 |
 
-v0.9.0 还提供 `get_publisher_info`（实际运行版本和能力）、`get_game_materials`（页面物料与封面预览）、`get_game_announcement`（首发宣传资格和草稿）、`publish_game_announcement({gameSlug,launchReference,title,body,approved:true})`（发布已批准的首发帖子）。`set_game_details` 与 `set_game_covers` 的 `fillMissing:true` 用于只补缺失文案或未设置的封面模式，保留已有内容和作者选择。
+v0.9.0 还提供 `get_publisher_info`（实际运行版本和能力）、`get_game_materials`（页面物料与封面预览）。`set_game_details` 与 `set_game_covers` 的 `fillMissing:true` 用于只补缺失文案或未设置的封面模式，保留已有内容和作者选择。
 
 ### 自动同步游戏文字
 
@@ -222,9 +225,9 @@ v0.9.0 还提供 `get_publisher_info`（实际运行版本和能力）、`get_ga
 
 ### 常规上架物料
 
-`prepare_game.promotion` 分别列出分类、标签、主封面、截图和预览，不受多语言选项影响。先复用作者已有物料及项目根目录 `1gp-kit/game.json` 的安全候选；读取失败标为未知，不当作空内容覆盖。候选文件或已上传链接不等于质量已验证，AI 仍需查看图片、播放预览。分类按真实代码和试玩判断，从 casual、puzzle、action、strategy、simulation、adventure、idle、rhythm 中选一个；标签使用作者主语言，最多 5 个、每个最多 12 字，不能重复分类或虚构功能。
+`prepare_game.promotion` 分别列出分类、标签、制作信息、主封面、截图和预览，不受多语言选项影响；首发需要除预览外的全部（`required`，截图至少 3 张）。先复用作者已有物料及项目根目录 `1gp-kit/game.json` 的安全候选；读取失败标为未知，不当作空内容覆盖。候选文件或已上传链接不等于质量已验证，AI 仍需查看图片、播放预览。分类按真实代码和试玩判断，从 casual、puzzle、action、strategy、simulation、adventure、idle、rhythm 中选一个；标签使用作者主语言，最多 5 个、每个最多 12 字，不能重复分类或虚构功能。
 
-MCP **负责检查、上传和保存，不内置浏览器截图、录屏或图像生成**。宿主 AI 用自己的可用工具补齐缺失素材：标题在小尺寸仍清晰的 16:9 主封面、建议 3–5 张不同实机截图、优先 12–18 秒的真实玩法预览。先复用现有素材；不改玩法、不接管游戏时钟、不碰玩家存档，不用生成图片冒充实机。缺工具或作者明确跳过时逐项报告，不把部署成功等同于物料齐全。多语言无字底图和文字叠加另由 `set_game_covers` 处理。
+MCP **负责检查、上传和保存，不生成图片**；截图和宣传视频可用 `record_game_video` 录。宿主 AI 补齐缺失素材：标题在小尺寸仍清晰的 16:9 主封面、3–5 张不同实机截图（脚本或 `REC.shot` 截，抽看一两张）；预览可选，上线后问作者要不要做，直接出不超过 5 MB 的 MP4。先复用现有素材；只拍游戏里真实会发生的东西，不碰玩家存档，不用生成图片冒充实机。缺工具或作者明确跳过时逐项报告，不把部署成功等同于物料齐全。多语言无字底图和文字叠加另由 `set_game_covers` 处理。
 
 取得真实游戏 ID 后，用 `set_game_details({gameSlug,genre,tags,fillMissing:true})` 和 `set_game_media({project_directory,gameSlug,cover,screenshots,preview,fillMissing:true})` 上传实际准备好的内容。媒体路径相对项目；整批安全读取并验证后才开始写入。图片源文件最多 20 MiB、2500 万像素，MCP 转为不超过 2 MiB 的 WebP；预览支持 GIF/WebP/MP4/WebM，最多 20 MiB，不在服务器转码。截图只追加，重复内容不重复添加；主封面和预览只补缺，已有内容及作者关闭预览的选择保留。修改现有内容仍使用作者编辑页。
 
@@ -234,17 +237,32 @@ MCP **负责检查、上传和保存，不内置浏览器截图、录屏或图�
 
 ## 授权与限制
 
-本地凭证保存在 `~/.config/1gp-studio/`，目录权限 0700，文件权限 0600。平台仅保存 SHA-256 哈希。凭证不会通过工具结果或浏览器 URL 输出。授权 90 天有效，可发布和管理自己游戏的构建、页面信息、翻译、封面及云存档/排行榜设置，并通过专用工具发布作者明确批准的首发宣传，不能读取玩家存档或代玩家提交成绩；在网站「我的发布」撤销后，再运行 connect_platform 可重新连接。
+本地凭证保存在 `~/.config/1gp-studio/`，目录权限 0700，文件权限 0600。平台仅保存 SHA-256 哈希。凭证不会通过工具结果或浏览器 URL 输出。授权 90 天有效，可发布和管理自己游戏的构建、页面信息、翻译、封面及云存档/排行榜设置，并在作者同意后发社区帖，不能读取玩家存档或代玩家提交成绩；在网站「我的发布」撤销后，再运行 connect_platform 可重新连接。
 
 平台目前限制全站同时 2 个构建、每个账号最多 50 个作品，不设每日次数限制。账号邮箱验证由 Supabase 负责；平台管理员必须配置生产邮件服务，才能支持组织外用户收取登录邮件。AIWANNA 托管团队的 Vercel 套餐及运行限制仍适用；不占用用户个人 Vercel 账号。GitHub 来源继续遵守仓库授权与构建限制。
 
 开发时可使用 `ONEGP_PLATFORM_URL` 指向另一 HTTPS 平台，或本机 HTTP localhost/127.0.0.1；凭证按平台分别保存。测试运行 `npm test`，包括真实 MCP stdio 客户端集成测试。
 
+## v0.15.0：上传过的物料都能改
+
+作者明确要求时，网页「编辑」能改的物料，MCP 现在也都能改。自动补全仍然只补缺，不动作者已有的内容。
+- `set_game_media` 新增 `replacePreview:true`：用作者看过的新预览替换现有预览；作者关掉过预览时，也可以用它重新放上。
+- 新增 `edit_game_media({gameSlug, removeScreenshots, screenshotOrder, removePreview})`：删除截图、调整截图顺序（列出的排在前面，其余保持原顺序）、撤下预览。截图 id 从 `get_game_materials` 的 `media.screenshots.items` 读取。换一张截图的做法：先用 `set_game_media` 传新图，再在这里删掉旧图、把新图排到原来的位置。
+- `set_game_details` 不带 `fillMissing` 时，`genre` / `tags` 会替换已有的分类和标签（只给其中一个时，另一个保持不变）；带 `fillMissing:true` 时仍然只补缺。
+- `get_publisher_info` 新增 `preview-replace`、`media-edit`、`labels-replace` 能力。平台接口早已支持，不需要迁移。
+- 新增 `create_game_post`：作者要发帖时随时发社区帖，类型、次数不限；先给作者看完整内容，同意后再发。
+- 移除 `get_game_announcement` 和 `publish_game_announcement`；`prepare_game` 不再有 `announcement` 选项，发布前什么都不问。
+- `complete_game_update` 只写版本记录（游戏页「版本更新」、关注动态、更新榜），不再发社区帖，也不再接受 `image`；要发帖用 `create_game_post`。
+- `edit_game_post` 可以改图片（`images` 列表）。
+- 首发除分类、标签、主封面外，还需要制作信息（`maker`：AI 工具、屏幕、一局多久）和至少 3 张真实截图；预览改为上线后问作者要不要做，用 `record_game_video` 录，直接出不超过 5 MB 的 MP4，只拍游戏里真实会发生的东西，不碰玩家存档。`upload_game_text` 新增 `replaceEdited:true`（作者要求时连他在网站上改过的译文也替换），`set_game_media` 新增 `replaceScreenshots:true`（按给定顺序整组替换截图）。
+- 新增 `record_game_video({project_directory, director, root?, page?, size?, out?})`：用本机 Chrome 或 Edge 无头打开游戏，运行你写的导演脚本，逐帧录宣传视频（带游戏声音），存成不超过 5 MB 的 MP4（浏览器不支持 H.264 时是 WebM），`REC.shot` 顺手存截图。不用另装 Python 或 ffmpeg。怎么拍由你决定，目标是让玩家一看就想玩，只拍游戏里真实会发生的东西，不动玩家存档。游戏代码在启动主循环那句前加 `/*TRAILER_HOOK*/` 时，导演脚本在游戏自己的作用域里运行；不加时在全局运行，页面的 requestAnimationFrame 和时钟被接管，用 `REC.advance(ms)` 推进。
+- 需配套平台迁移 `202610270001_post_edits.sql`、`202610270003_update_without_post.sql` 和对应网站部署（均已上线）。
+
 ## v0.14.1：封面可以换，已有封面不被覆盖
 
 - `set_game_media` 新增 `replaceCover:true`：作者明确要求换主封面时，用作者看过的 `cover` 替换现有主封面，和网页「编辑」里替换封面走同一个平台接口；不传时主封面仍然只补缺失，预览和截图规则不变。`get_publisher_info` 新增 `main-cover-replace` 能力；平台接口早已支持，不需要迁移。
 - `set_game_covers` 跳过上传时返回 `preserved`，说明保留了哪些已有封面；上传前先压缩图片。
-- 平台提示词要求的最低版本改为 0.14.1，安装固定到 `#v0.14.1`。不需要迁移。
+- 平台提示词要求的最低版本改为 0.14.1，安装固定到 `#v0.15.0`。不需要迁移。
 
 ## v0.14.0：评论建议完成后自动同步进度
 

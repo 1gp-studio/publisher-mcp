@@ -75,9 +75,9 @@ function uploadUrl(data, extension) {
   } catch { return null; }
 }
 
-async function uploadPreview(platform, slug, file, token, unchanged) {
+async function uploadPreview(platform, slug, file, token, unchanged, fillMissing = true) {
   const path = `/api/games/${encodeURIComponent(slug)}/preview`, options = { token, idempotencyKey: file.sha256 };
-  const signed = await platform.request(path, { ...options, body: { action: 'sign', type: file.contentType, size: file.bytes.length, fillMissing: true } });
+  const signed = await platform.request(path, { ...options, body: { action: 'sign', type: file.contentType, size: file.bytes.length, fillMissing } });
   if (signed?.error) return signed;
   if (signed?.ok === true) return savedResult(signed, platform, 'preview', signed.skipped === true);
   if (!await unchanged()) return accountChanged();
@@ -92,17 +92,40 @@ async function uploadPreview(platform, slug, file, token, unchanged) {
   // A previous PUT may have completed before the client lost its response. Only the platform's
   // verified complete step may accept the existing staging object; a 409 is never success by itself.
   if (!await unchanged()) return accountChanged();
-  const completed = await platform.request(path, { ...options, body: { action: 'complete', path: signed.path, fillMissing: true } });
+  const completed = await platform.request(path, { ...options, body: { action: 'complete', path: signed.path, fillMissing } });
   return savedResult(completed, platform, 'preview');
 }
 
 /** Upload reviewed, real local materials. Creates no screenshots, artwork or fictitious footage.
- *  replaceCover: the author explicitly asked for this cover to replace the current main cover (the edit page's own
- *  replace); without it the main cover, like the preview, is only filled when missing. */
-export async function setGameMedia(platform, projectDirectory, gameSlug, { cover, screenshots = [], preview, fillMissing = true, replaceCover } = {}) {
+ *  replaceCover / replacePreview: the author explicitly asked for this cover or preview to replace the current one (the
+ *  edit page's own replace); without them the main cover and the preview are only filled when missing. */
+/** replaceScreenshots: the author asked for exactly these screenshots, in this order, instead of the current ones. */
+export async function setGameMedia(platform, projectDirectory, gameSlug, { replaceScreenshots, ...input } = {}) {
+  if (replaceScreenshots === undefined) return addGameMedia(platform, projectDirectory, gameSlug, input);
+  if (replaceScreenshots !== true || !input.screenshots?.length) return failure('INVALID_MEDIA', 'replaceScreenshots 只能为 true，并且要给出作者确认过的新截图 screenshots。');
+  const materials = await platform.request(`/api/developer/game-materials/${encodeURIComponent(gameSlug)}`);
+  const before = materials?.media?.screenshots?.items;
+  if (!Array.isArray(before)) return materials?.error ? materials : invalidResponse();
+  const old = before.map(item => item.id).filter(uuid);
+  // Make room first only when the new set would not fit next to the old one.
+  const early = old.length + input.screenshots.length > 20 ? old : [];
+  if (early.length) { const cleared = await editGameMedia(platform, gameSlug, { removeScreenshots: early }); if (cleared.error) return cleared; }
+  const added = await addGameMedia(platform, projectDirectory, gameSlug, input);
+  if (added.error) return { ...added, ...(early.length ? { removedScreenshots: early } : {}) };
+  const fresh = [...added.uploaded, ...added.skipped].filter(item => item.target === 'screenshot' && uuid(item.id)).map(item => item.id);
+  const leftover = old.filter(id => !early.includes(id) && !fresh.includes(id));
+  const order = [...new Set(fresh)];
+  const edited = await editGameMedia(platform, gameSlug, { ...(leftover.length ? { removeScreenshots: leftover } : {}), ...(order.length ? { screenshotOrder: order } : {}) });
+  if (edited.error) return { ...edited, uploaded: added.uploaded, partial: true };
+  return { ...added, removedScreenshots: [...early, ...edited.removedScreenshots], screenshotOrder: edited.screenshotOrder ?? order,
+    message: '已按作者要求换成这组截图。' + added.message };
+}
+
+async function addGameMedia(platform, projectDirectory, gameSlug, { cover, screenshots = [], preview, fillMissing = true, replaceCover, replacePreview } = {}) {
   if (typeof gameSlug !== 'string' || gameSlug.length > 200 || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(gameSlug)
     || fillMissing !== true || !Array.isArray(screenshots) || screenshots.length > 20 || !cover && !preview && !screenshots.length) return failure('INVALID_MEDIA', '请提供真实游戏标识及至少一份素材；截图最多 20 张，主封面和预览只补缺失。');
   if (replaceCover !== undefined && (replaceCover !== true || !cover)) return failure('INVALID_MEDIA', 'replaceCover 只能为 true，并且要同时给出作者确认过的新主封面 cover。');
+  if (replacePreview !== undefined && (replacePreview !== true || !preview)) return failure('INVALID_MEDIA', 'replacePreview 只能为 true，并且要同时给出作者确认过的新预览 preview。');
   const token = await platform.token?.();
   if (!token) return failure('AUTH_REQUIRED', '请先连接 AIWANNA 账号。');
   const unchanged = async () => await currentToken(platform) === token;
@@ -126,7 +149,7 @@ export async function setGameMedia(platform, projectDirectory, gameSlug, { cover
       active = file;
       if (!await unchanged()) return stop(accountChanged());
       const path = `/api/games/${encodeURIComponent(gameSlug)}/${file.target === 'cover' ? replaceCover ? 'cover' : 'cover?fillMissing=true' : 'screenshots'}`;
-      const raw = file.target === 'preview' ? await uploadPreview(platform, gameSlug, file, token, unchanged)
+      const raw = file.target === 'preview' ? await uploadPreview(platform, gameSlug, file, token, unchanged, !replacePreview)
         : await platform.uploadBytes(path, file.bytes, { token, type: file.contentType, idempotencyKey: file.sha256 });
       const data = file.target === 'preview' ? raw : savedResult(raw, platform, file.target);
       if (data?.error) return stop(data);
@@ -137,6 +160,46 @@ export async function setGameMedia(platform, projectDirectory, gameSlug, { cover
     }
   } catch (error) { return stop(failure('INVALID_MEDIA', error instanceof Error ? error.message : '无法安全读取或验证素材。')); }
   return { ok: true, partial: false, uploaded, skipped, verificationRequired: true,
-    message: (replaceCover ? '已按作者要求替换主封面；预览只补缺失，' : '已处理提交的真实素材；已有作者封面和预览保留，')
-      + '截图只追加且相同内容不重复。请读取 get_game_materials，并实际查看主封面、截图和预览；上传成功不代表画面或玩法已验证。' };
+    message: [replaceCover ? '已按作者要求替换主封面' : '主封面只补缺失', replacePreview ? '已按作者要求替换预览' : '预览只补缺失'].join('，')
+      + '；截图只追加且相同内容不重复，删除或排序用 edit_game_media。请读取 get_game_materials，并实际查看主封面、截图和预览；上传成功不代表画面或玩法已验证。' };
+}
+
+/** The edit page's other media changes, only on the author's explicit request: delete screenshots (by the ids
+ *  get_game_materials returns), put screenshots in a new order (the given ids first, the rest keep their order), and
+ *  take the preview down. Replacing a screenshot is set_game_media (new picture), then this (remove the old, order). */
+export async function editGameMedia(platform, gameSlug, { removeScreenshots = [], screenshotOrder, removePreview } = {}) {
+  if (typeof gameSlug !== 'string' || gameSlug.length > 200 || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(gameSlug)) return failure('INVALID_GAME_SLUG', '请提供有效的游戏标识。');
+  const ids = list => Array.isArray(list) && list.length <= 20 && list.every(uuid) && new Set(list).size === list.length;
+  if (!ids(removeScreenshots) || screenshotOrder !== undefined && (!ids(screenshotOrder) || !screenshotOrder.length) || removePreview !== undefined && removePreview !== true
+    || !removeScreenshots.length && !screenshotOrder && !removePreview) return failure('INVALID_MEDIA', '请给出要删除的截图 id、新的截图顺序或 removePreview:true；截图 id 来自 get_game_materials。');
+  if (screenshotOrder?.some(id => removeScreenshots.includes(id))) return failure('INVALID_MEDIA', '同一张截图不能既删除又排序。');
+  const token = await platform.token?.();
+  if (!token) return failure('AUTH_REQUIRED', '请先连接 AIWANNA 账号。');
+  const base = `/api/games/${encodeURIComponent(gameSlug)}`, removed = [], missing = [];
+  const done = extra => ({ removedScreenshots: removed, ...(missing.length ? { notFound: missing } : {}), ...extra });
+  for (const id of removeScreenshots) {
+    if (await currentToken(platform) !== token) return { ...accountChanged(), ...done({ ok: false }) };
+    const result = await platform.request(`${base}/screenshots?id=${id}`, { method: 'DELETE', token });
+    if (result?.ok === true) removed.push(id);
+    else if (result?.status === 404 || result?.error === '找不到这张截图。') missing.push(id);
+    else return { ...(result?.error ? result : invalidResponse()), ...done({ ok: false }) };
+  }
+  let order;
+  if (screenshotOrder) {
+    const materials = await platform.request(`/api/developer/game-materials/${encodeURIComponent(gameSlug)}`);
+    const current = materials?.media?.screenshots?.items;
+    if (!Array.isArray(current)) return { ...(materials?.error ? materials : invalidResponse()), ...done({ ok: false }) };
+    const known = current.map(item => item.id);
+    const unknown = screenshotOrder.filter(id => !known.includes(id));
+    if (unknown.length) return { ...failure('UNKNOWN_SCREENSHOT', '排序里有不属于这个游戏的截图 id，请重新读取 get_game_materials。'), unknown, ...done({ ok: false }) };
+    order = [...screenshotOrder, ...known.filter(id => !screenshotOrder.includes(id))];
+    const result = await platform.request(`${base}/screenshots`, { method: 'PATCH', body: { order }, token });
+    if (result?.ok !== true) return { ...(result?.error ? result : invalidResponse()), ...done({ ok: false }) };
+  }
+  if (removePreview) {
+    const result = await platform.request(`${base}/preview`, { body: { action: 'remove' }, token });
+    if (result?.ok !== true) return { ...(result?.error ? result : invalidResponse()), ...done({ ok: false, ...(order ? { screenshotOrder: order } : {}) }) };
+  }
+  return { ok: true, ...done({ ...(order ? { screenshotOrder: order } : {}), ...(removePreview ? { previewRemoved: true } : {}) }),
+    message: '已按作者要求修改。请读取 get_game_materials 并实际查看游戏页的截图和预览。' };
 }

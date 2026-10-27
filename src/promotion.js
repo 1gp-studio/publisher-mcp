@@ -62,6 +62,13 @@ async function readLocalKit(projectDirectory) {
 
 function platformItem(key, materials) {
   const labels = materials.labels, media = materials.media;
+  if (key === 'maker') {
+    const maker = materials.maker;
+    if (!record(maker)) return null;
+    // 制作信息 counts as there once the AI tools, the screen and the session length are set; notes are optional.
+    const done = Array.isArray(maker.tools) && maker.tools.length > 0 && typeof maker.orientation === 'string' && typeof maker.session === 'string';
+    return { missing: !done, value: { tools: maker.tools ?? [], orientation: maker.orientation ?? null, session: maker.session ?? null }, source: 'creator' };
+  }
   if (key === 'genre') {
     if (!record(labels) || !Object.hasOwn(labels, 'genre') || labels.genre !== null && !genres.includes(labels.genre)) return null;
     return labels.genre === null ? { missing: true } : { missing: false, value: labels.genre, source: labels.genreSource ?? 'platform' };
@@ -89,21 +96,22 @@ function platformItem(key, materials) {
   return { missing: item.missing, src: item.src, ...(key === 'mainCover' ? { source: item.source } : { kind: item.kind }) };
 }
 
-// A first launch needs these; screenshots and a preview can follow after launch.
-const required = ['genre', 'tags', 'mainCover'];
+const required = ['genre', 'tags', 'mainCover', 'maker', 'screenshots'];
+// A first launch needs everything but the preview (and languages); the preview is offered afterwards.
 const nextSteps = {
   genre: '根据代码、规则和实玩证据选择一个最主要的玩法分类，不凭项目名或框架猜分类；分类规则见 classification。',
   tags: '根据主角、画风、核心玩法和操作方式拟定主语言标签，最多 5 个、每个不超过 12 字。不确定的术语先核实，不能只凭升级系统就认定 Roguelike；与分类的关系见 classification。',
+  maker: '根据代码和制作过程填制作信息：用了哪些 AI 工具、适合的屏幕（portrait/landscape/desktop）、一局多久；制作笔记可选，用作者的口吻写，先给作者看。用 set_game_details 的 maker。',
   mainCover: '优先复用已有封面或项目授权美术；缺少时由宿主工具制作清楚可读的 16:9 主封面，建议 1600×900。多语言自动叠字另复用一张无字底图，不需要各语言截图。',
-  screenshots: '可选，可上线后补。优先复用真实截图；缺少时运行游戏，用宿主浏览器/computer use 截取 3–5 个不同实机状态，保持原比例。不得用生成图冒充游戏截图。',
-  preview: '可选，可上线后补。优先复用已有真实玩法预览；否则由宿主录制或沿用已验证的捕获脚本，建议 12–18 秒、MP4/WebM/GIF/动态 WebP。可以剪辑真实片段，不捏造玩法或奖励，不强制接管时钟、改玩法或动玩家存档。',
+  screenshots: '首发需要至少 3 张真实截图。优先复用已有截图；缺少时用脚本或 record_game_video（REC.shot）截 3–5 个不同的实机状态（保持原比例），只抽看一两张确认。不得用生成图冒充游戏截图。',
+  preview: '可选，首发后问作者要不要做一段宣传视频，作者要再做：用 record_game_video 录制，目标是让玩家一眼就想玩；直接出正片 MP4，不超过 5 MB；只拍游戏里真实会发生的东西，不碰玩家存档。',
 };
 
 /** Read-only store-material plan. Presence is not visual verification or consent to overwrite. */
 export async function preparePromotion(projectDirectory, { gameSlug, materials } = {}) {
   const localKit = await readLocalKit(projectDirectory);
   const snapshot = !gameSlug ? 'new_game' : !record(materials) || materials.error ? 'unknown' : 'available';
-  const candidates = { genre: localKit.metadata.genre ?? null, tags: localKit.metadata.tags?.length ? localKit.metadata.tags : null,
+  const candidates = { genre: localKit.metadata.genre ?? null, tags: localKit.metadata.tags?.length ? localKit.metadata.tags : null, maker: null,
     mainCover: localKit.media.mainCover ?? null, screenshots: localKit.media.screenshots?.length ? localKit.media.screenshots : null, preview: localKit.media.preview ?? null };
   const items = {};
   for (const key of Object.keys(nextSteps)) {
@@ -115,20 +123,21 @@ export async function preparePromotion(projectDirectory, { gameSlug, materials }
       ...(key === 'screenshots' ? { suggestedCount: { min: 3, max: 5 }, max: limits.screenshots,
         ...(state === 'existing' ? { additionalSuggested: saved.count > 0 ? Math.max(0, 3 - saved.count) : 0,
           ...(saved.source === 'curated' ? { replacementWarning: '现有展示来自精选截图；新增任意作者截图会替换整组精选展示。保留复用，不为了凑到 3–5 张自动上传。' } : {}) } : {}) } : {}),
-      ...(key === 'preview' ? { suggestedSeconds: { min: 12, max: 18 }, durationVerified: false } : {}),
+      ...(key === 'preview' ? { durationVerified: false } : {}),
       nextStep: state === 'unknown' ? '先恢复或更新平台物料读取，确认已有内容；本地候选不能证明线上为空，不据此覆盖。'
         : state === 'author_disabled' ? '作者已关闭预览，保留此选择；只有明确要求才重新开启。'
-          : state === 'existing' ? `复用平台已有物料；核对当前版本、内容和展示效果，未经作者要求不替换。${key === 'screenshots' && saved.count > 0 && saved.count < 3 ? '现有作者截图少于 3 张，建议补充不同实机状态达到 3–5 张；保留已有截图，避免重复上传。' : ''}${key === 'screenshots' && saved.source === 'curated' ? '现有精选截图应直接复用；新增作者图会替换整组精选展示，不为凑数自动上传。' : ''}`
+          : state === 'existing' ? `复用平台已有物料；核对当前版本、内容和展示效果，未经作者要求不替换。${key === 'screenshots' && saved.count > 0 && saved.count < 3 ? '现有作者截图少于 3 张，首发需要至少 3 张，补充不同实机状态达到 3–5 张；保留已有截图，避免重复上传。' : ''}${key === 'screenshots' && saved.source === 'curated' ? '现有精选截图应直接复用；新增作者图会替换整组精选展示，不为凑数自动上传。' : ''}`
             : nextSteps[key],
     };
   }
   const unknown = Object.keys(items).filter(key => items[key].state === 'unknown');
-  const missing = Object.keys(items).filter(key => ['prepare_needed', 'local_candidate'].includes(items[key].state));
+  // One or two author screenshots are not enough for a first launch (a curated set is).
+  const missing = Object.keys(items).filter(key => ['prepare_needed', 'local_candidate'].includes(items[key].state) || items[key].additionalSuggested > 0);
   return { snapshot, independentOfMultilingual: true, verified: false, verificationRequired: true,
     primaryLanguage: typeof materials?.original?.locale === 'string' ? materials.original.locale : null,
     availableGenres: [...genres], classification: classificationGuidance.zh, limits: { ...limits }, required: [...required], items, localKit,
     missing, requiredMissing: missing.filter(key => required.includes(key)), unknown,
-    capabilities: { generatesImages: false, capturesScreenshots: false, recordsVideo: false, requiresHostTools: true },
-    instructions: '这份清单独立于多语言选择；无需逐项询问用户。首发只需要 required 里的分类、标签和主封面；截图和预览可以上线后再补，有现成素材或工具时顺手准备，没做的写进收尾的可选功能提醒。宿主 AI 根据项目与实玩证据准备缺项，集中展示可审阅的物料，沿用已有授权。MCP 不自带截图、图像生成或录屏能力；本地文件仅核对路径和大小，不能证明真实玩法、画质、类型或视频时长。未知平台状态先恢复读取；已有素材先复用，作者关闭的预览保持关闭。没有捕获/图像/视频工具时如实说明，不伪造完成。新游戏先本地准备，取得真实游戏标识后再上传。仅更新平台物料不需要再次部署游戏；上传后实际打开封面、截图和预览检查，不能用 ready 或上传成功代替验证。',
+    capabilities: { generatesImages: false, capturesScreenshots: true, recordsVideo: true, recorder: 'record_game_video', requiresHostTools: false },
+    instructions: '这份清单独立于多语言选择；无需逐项询问用户。首发需要 required 里的分类、标签、主封面、制作信息和至少 3 张真实截图；预览可选，上线后问作者要不要做宣传视频，没做的写进收尾的可选功能提醒。宿主 AI 根据项目与实玩证据准备缺项，集中展示可审阅的物料，沿用已有授权。MCP 不生成图片，截图和宣传视频可用 record_game_video 录；本地文件仅核对路径和大小，不能证明真实玩法、画质、类型或视频时长。未知平台状态先恢复读取；已有素材先复用，作者关闭的预览保持关闭。没有捕获/图像/视频工具时如实说明，不伪造完成。新游戏先本地准备，取得真实游戏标识后再上传。仅更新平台物料不需要再次部署游戏；上传后实际打开封面、截图和预览检查，不能用 ready 或上传成功代替验证。',
   };
 }

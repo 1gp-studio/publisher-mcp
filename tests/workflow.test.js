@@ -72,7 +72,8 @@ async function fixture(t, handler, { connected = true } = {}) {
 test('new workflow tools and opt-in prompts are discoverable through the actual MCP connection', async t => {
   const f = await fixture(t, () => { throw new Error('Discovery must not call the platform'); });
   const tools = (await f.client.listTools()).tools;
-  for (const name of ['prepare_game', 'get_game_integrations', 'configure_cloud_saves', 'configure_leaderboard', 'wait_for_publish', 'get_publisher_info', 'get_game_materials', 'get_game_announcement', 'publish_game_announcement', 'complete_game_update', 'get_game_updates', 'delete_game_update', 'set_game_media']) assert.ok(tools.some(tool => tool.name === name), name);
+  for (const name of ['prepare_game', 'get_game_integrations', 'configure_cloud_saves', 'configure_leaderboard', 'wait_for_publish', 'get_publisher_info', 'get_game_materials', 'create_game_post', 'complete_game_update', 'get_game_updates', 'delete_game_update', 'set_game_media']) assert.ok(tools.some(tool => tool.name === name), name);
+  for (const name of ['get_game_announcement', 'publish_game_announcement']) assert.ok(!tools.some(tool => tool.name === name), `${name} is removed`);
   for (const name of ['complete_game_update', 'delete_game_update']) assert.ok(tools.find(tool => tool.name === name).inputSchema.required.includes('approved'), `${name} requires author approval`);
   const cloud = tools.find(tool => tool.name === 'configure_cloud_saves');
   assert.deepEqual([...cloud.inputSchema.required].sort(), ['enabled', 'gameSlug', 'schemaVersion']);
@@ -185,13 +186,13 @@ test('prepare_game aggregates preparation once, remembers only explicit choices,
   assert.equal(data.gameSlug, 'owned-game'); assert.equal(data.channel, 'local'); assert.equal(data.inspection.ready, true);
   assert.equal(data.materials.error, undefined); assert.equal(data.materials.original.locale, 'zh');
   assert.equal(data.languageCheck.multilingual, false); assert.equal(data.integrations.cloudSaves.enabled, false);
-  assert.deepEqual(data.features, { multilingual: null, cloudSaves: null, leaderboards: null, announcement: null });
+  assert.deepEqual(data.features, { multilingual: null, cloudSaves: null, leaderboards: null });
   assert.deepEqual(data.decisions, []); assert.deepEqual(data.optionalFeatures, ['multilingual', 'cloudSaves', 'leaderboards']);
   assert.equal(f.requests.length, 6, 'One game match, release context, integrations, materials and each text source mode read');
   assert.deepEqual(f.requests.filter(request => request.url.includes('/text-source/')).map(request => request.url).sort(), ['/api/developer/text-source/owned-game?use=keys', '/api/developer/text-source/owned-game?use=phrases']);
   assert.deepEqual(Object.keys(data.textSources).sort(), ['keys', 'phrases']);
   const selected = parsed(await f.client.callTool({ name: 'prepare_game', arguments: { ...args, features: { cloudSaves: true, leaderboards: false } } }));
-  assert.deepEqual(selected.features, { multilingual: null, cloudSaves: true, leaderboards: false, announcement: null });
+  assert.deepEqual(selected.features, { multilingual: null, cloudSaves: true, leaderboards: false });
   assert.equal(selected.integrations.cloudSaves.enabled, false, 'Remembered intention must not be reported as an enabled service');
   await f.disconnect(f.client); const resumed = await f.connect();
   assert.deepEqual(parsed(await resumed.callTool({ name: 'prepare_game', arguments: args })).features, selected.features);
@@ -275,9 +276,9 @@ test('link and Docker deployments carry their prepared update group and complete
         return { body: { id: buildId, state: 'ready', path: '/games/owned-game' } };
       }
       assert.equal(request.url, `/api/developer/game-updates/${updateId}/complete`);
-      assert.deepEqual(request.body, { title: 'Combined release', notes: 'All selected features verified.', approved: true });
+      assert.deepEqual(request.body, { title: 'Combined release', notes: 'All selected features verified.', approved: true, post: false });
       const created = !completed; completed = true;
-      return { body: { updateId, gameSlug: 'owned-game', status: 'published', created, version: '1.0.0', post: { id: boardId, url: `https://www.ai-made.games/community/p/${boardId}` } } };
+      return { body: { updateId, gameSlug: 'owned-game', status: 'published', created, version: '1.0.0', post: null } };
     });
     const game = join(f.home, 'game'); await mkdir(game); await writeFile(join(game, 'index.html'), '<canvas>Game</canvas>');
     updateId = (await prepareGameUpdate(f.platform, game, { gameSlug: 'owned-game' })).id;
@@ -325,7 +326,7 @@ test('author update listing and deletion tools use exact selected references thr
   assert.equal(f.requests.some(request => request.url === '/api/publish'), false, 'Record removal cannot redeploy or roll back a game');
 });
 
-test('runtime version and materials/announcement contracts are exposed through the running MCP', async t => {
+test('runtime version, materials and post contracts are exposed through the running MCP', async t => {
   const f = await fixture(t, request => ({ body: request.url.includes('game-announcement') ?
     { game: { id: gameId, slug: 'owned-game', url: playerOrigin + '/games/owned-game' }, ready: true, eligible: true, launchReference: 'build:' + buildId, announcement: { status: 'missing' }, draft: { title: 'Launch', body: 'Play the game' }, id: boardId, url: playerOrigin + '/community/p/' + boardId, created: true, status: 'published' } :
     { game: { id: gameId, slug: 'owned-game' }, original: { locale: 'zh' }, languages: [], covers: {}, ok: true, filled: { titles: ['ja'], descriptions: [] }, skipped: {} } }));
@@ -338,15 +339,10 @@ test('runtime version and materials/announcement contracts are exposed through t
   assert.equal(filled.isError, false);
   assert.deepEqual(f.requests.at(-1).body, { titles: { ja: 'ゲーム' }, fillMissing: true });
   assert.equal(f.requests.at(-1).method, 'PATCH');
-  await f.client.callTool({ name: 'get_game_announcement', arguments: { gameSlug: 'owned-game' } });
-  const content = { gameSlug: 'owned-game', title: 'Launch', body: 'Play the game', launchReference: 'build:' + buildId };
+  const post = { kind: 'chat', title: 'Launch', body: 'Play the game' };
   const before = f.requests.length;
-  for (const extra of [{}, { approved: false }]) assert.equal((await f.client.callTool({ name: 'publish_game_announcement', arguments: { ...content, ...extra } })).isError, true);
-  assert.equal(f.requests.length, before, 'No HTTP post without explicit content approval');
-  const posted = await f.client.callTool({ name: 'publish_game_announcement', arguments: { ...content, approved: true } });
-  assert.equal(posted.isError, false);
-  assert.equal(f.requests.at(-1).method, 'POST');
-  assert.equal(f.requests.at(-1).url, '/api/developer/game-announcement/owned-game');
+  for (const extra of [{}, { approved: false }]) assert.equal((await f.client.callTool({ name: 'create_game_post', arguments: { ...post, ...extra } })).isError, true);
+  assert.equal(f.requests.length, before, 'No HTTP post without the author agreeing');
 });
 
 test('cover tool accepts partial language choices through stdio and retains incomplete-material reports', async t => {
@@ -383,10 +379,10 @@ test('store labels only fill missing metadata and actual media bytes travel thro
     return { body: { ok: true, created, skipped: false, src: `/api/${screenshot ? 'game-shots' : 'game-covers'}/${gameId}/${boardId}.webp`, ...(screenshot ? { id: boardId, width: metadata.width, height: metadata.height } : {}) } };
   });
   const details = { gameSlug: 'owned-game', genre: 'action', tags: ['肉鸽', '像素'] };
-  for (const options of [{}, { fillMissing: false }, { fillMissing: true, languages: ['zh'] }]) {
+  for (const options of [{ fillMissing: true, languages: ['zh'] }, { fillMissing: true, maker: { session: 'short' } }]) {
     assert.equal((await f.client.callTool({ name: 'set_game_details', arguments: { ...details, ...options } })).isError, true);
   }
-  assert.equal(f.requests.length, 0, 'Classification never falls back to the old overwriting endpoint');
+  assert.equal(f.requests.length, 0, 'fillMissing never mixes with languages or maker details');
   const filled = await f.client.callTool({ name: 'set_game_details', arguments: { ...details, fillMissing: true } });
   assert.equal(filled.isError, false); assert.equal(parsed(filled).filled.genre, true);
   const game = join(f.home, 'game'); await mkdir(game);

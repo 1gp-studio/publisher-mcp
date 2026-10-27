@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import sharp from 'sharp';
 import { uploadPostImage } from '../src/post-images.js';
-import { publishGameAnnouncement } from '../src/announcement.js';
+import { createGamePost } from '../src/game-posts.js';
 import { prepareGameUpdate, publishGameUpdate, completeGameUpdate } from '../src/game-updates.js';
 
 const postId = '22222222-2222-4222-8222-222222222222', buildId = '33333333-3333-4333-8333-333333333333';
@@ -66,33 +66,27 @@ test('missing, escaping or non-image paths and incomplete platform answers are r
   assert.deepEqual(await uploadPostImage(f.platform, f.project, 'poster.png', 'launch:owned-game', 'a'.repeat(64)), f.state.upload);
 });
 
-test('a launch announcement uploads its picture for that launch and sends it with the approved text', async t => {
+test('a new post uploads its pictures first and sends them with the approved text', async t => {
   const f = await fixture(t);
-  const input = { title: 'Fishy Tails', body: 'Come fish', launchReference, approved: true };
-  assert.equal((await publishGameAnnouncement(f.platform, 'owned-game', { ...input, image: 'poster.png', projectDirectory: f.project })).status, 'published');
-  assert.equal(f.uploads[0].path, '/api/developer/post-images?for=launch%3Aowned-game');
-  const sent = f.requests.at(-1);
-  assert.equal(sent.path, '/api/developer/game-announcement/owned-game'); assert.equal(sent.options.token, 'a'.repeat(64));
-  assert.deepEqual(sent.options.body, { ...input, image: { path: storedPath, width: 1466, height: 1600, sig: 'f'.repeat(64) } });
-  // Without a picture nothing is uploaded and the body is unchanged from 0.11.0.
-  await publishGameAnnouncement(f.platform, 'owned-game', input);
-  assert.equal(f.uploads.length, 1); assert.deepEqual(f.requests.at(-1).options.body, input);
+  f.platform.request = async (path, options) => { f.requests.push({ path, options }); return { postId, created: true, url: `https://www.ai-made.games/community/p/${postId}` }; };
+  const input = { gameSlug: 'owned-game', kind: 'chat', title: 'Fishy Tails', body: 'Come fish', approved: true };
+  assert.equal((await createGamePost(f.platform, { ...input, images: ['poster.png'], projectDirectory: f.project })).created, true);
+  assert.match(f.uploads[0].path, /^\/api\/developer\/post-images\?for=new%3A[a-f0-9]{32}$/);
+  assert.deepEqual(f.requests.at(-1).options.body, { ...input, images: [{ path: storedPath, width: 1466, height: 1600, sig: 'f'.repeat(64) }] });
   // A failed upload never posts the text alone.
   const before = f.requests.length; f.state.upload = { code: 'SERVICE_UNAVAILABLE', error: 'Down' };
-  assert.equal((await publishGameAnnouncement(f.platform, 'owned-game', { ...input, image: 'poster.png', projectDirectory: f.project })).code, 'SERVICE_UNAVAILABLE');
+  assert.equal((await createGamePost(f.platform, { ...input, images: ['poster.png'], projectDirectory: f.project })).code, 'SERVICE_UNAVAILABLE');
   assert.equal(f.requests.length, before);
 });
 
-test('an update completion names the picture in its approval draft and posts it with the final notes', async t => {
+test('an update completion writes the version record only and sends no post', async t => {
   const f = await fixture(t);
   const update = await prepareGameUpdate(f.platform, f.project, { gameSlug: 'owned-game' });
   await publishGameUpdate(f.platform, { projectDirectory: f.project, gameSlug: 'owned-game', updateId: update.id }, async () => ({ id: buildId, state: 'ready' }));
-  const draft = await completeGameUpdate(f.platform, f.project, { updateId: update.id, title: 'Spring', notes: 'New fish.', image: 'poster.png' });
-  assert.equal(draft.code, 'APPROVAL_REQUIRED'); assert.match(draft.error, /图片/);
-  assert.deepEqual(draft.draft, { title: 'Spring', notes: 'New fish.', image: 'poster.png' });
-  assert.equal(f.uploads.length, 0, 'nothing is uploaded before approval');
-  const done = await completeGameUpdate(f.platform, f.project, { updateId: update.id, title: 'Spring', notes: 'New fish.', image: 'poster.png', approved: true });
+  const draft = await completeGameUpdate(f.platform, f.project, { updateId: update.id, title: 'Spring', notes: 'New fish.' });
+  assert.equal(draft.code, 'APPROVAL_REQUIRED'); assert.deepEqual(draft.draft, { title: 'Spring', notes: 'New fish.' });
+  const done = await completeGameUpdate(f.platform, f.project, { updateId: update.id, title: 'Spring', notes: 'New fish.', approved: true });
   assert.equal(done.status, 'published');
-  assert.equal(f.uploads[0].path, `/api/developer/post-images?for=update%3A${update.id}`);
-  assert.deepEqual(f.requests.at(-1).options.body, { title: 'Spring', notes: 'New fish.', approved: true, image: { path: storedPath, width: 1466, height: 1600, sig: 'f'.repeat(64) } });
+  assert.equal(f.uploads.length, 0);
+  assert.deepEqual(f.requests.at(-1).options.body, { title: 'Spring', notes: 'New fish.', approved: true, post: false });
 });

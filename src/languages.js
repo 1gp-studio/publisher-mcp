@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { prepareGameText } from './text-check.js';
 import { fontCoverage } from './fonts.js';
 import { resolve,isAbsolute,join,relative,sep,basename } from 'node:path';
+import { getGameMaterials } from './materials.js';
 
 // In-game text in every site language (platform docs/todo/game-translation.md, layer 1).
 // The convention: player-facing text by key (t('start')), one file in the game's own language,
@@ -96,7 +97,8 @@ export const convention=[
 ].join('\n');
 
 // Upload the game's own file, then each translation (marked as made by the creator's AI).
-export async function uploadGameText(platform,projectDirectory,gameSlug,original,translations=[],{force=false,separators=[],use='keys'}={}){
+// replaceEdited: the author asked to replace lines they had edited on AIWANNA too (uploaded as the creator's own text).
+export async function uploadGameText(platform,projectDirectory,gameSlug,original,translations=[],{force=false,separators=[],use='keys',replaceEdited=false}={}){
   if(!['keys','phrases'].includes(use))return {error:'文字模式不受支持。',code:'INVALID_USE'};
   const path=`/api/developer/language-files/${encodeURIComponent(gameSlug)}${use==='phrases'?'?use=phrases':''}`,uploaded=[],titles={filled:[],conflicts:[]};
   const fail=(error,failed)=>({...error,uploaded,failed:error.failed??failed});
@@ -142,7 +144,7 @@ export async function uploadGameText(platform,projectDirectory,gameSlug,original
   const expectedOriginal={locale:prepared.original.locale,hash:createHash('sha256').update(JSON.stringify(Object.keys(prepared.original.entries).sort().map(key=>[key,prepared.original.entries[key]]))).digest('hex')};
   const check=prepared.check;
   if(!check.ok&&!force)return fail({error:'译文检查没通过，先修好再上传（检查结果见 errors）。',code:'TEXT_CHECK_FAILED',...check},check.errors[0]?.locale??'files');
-  const queue=[...(original?[{...prepared.original,kind:'original'}]:[]),...prepared.translations.map(item=>({...item,kind:'translation',by:'ai_creator',expectedOriginal}))];
+  const queue=[...(original?[{...prepared.original,kind:'original'}]:[]),...prepared.translations.map(item=>({...item,kind:'translation',by:replaceEdited===true?'creator':'ai_creator',expectedOriginal}))];
   for(const item of queue)if(Buffer.byteLength(JSON.stringify(item))>400000)return fail({error:`${item.locale} 的上传内容不能超过 400 KB。`,code:'INVALID_LANGUAGE_FILE'},item.locale);
   const note=result=>{if(result.titleSync){titles.filled.push(...(result.titleSync.filled??[]));titles.conflicts.push(...(result.titleSync.conflicts??[]));}};
   let failed=queue[0]?.locale??'files';
@@ -175,12 +177,21 @@ export async function gameTextStatus(platform,gameSlug,{use='keys'}={}){
   if(!data||typeof data!=='object'||!Array.isArray(data.status)||data.status.some(item=>!item||typeof item!=='object'||!supportedGameLanguages.includes(item.locale)||typeof item.state!=='string'))return {error:'平台返回异常状态，请稍后查询。',code:'PLATFORM_ERROR'};
   return {platformTranslation:data.engine??null,status:(data.status??[]).map(item=>({locale:item.locale,state:item.state,total:item.total,done:item.done,missing:item.missing,stale:item.stale,editedByCreator:item.edited}))};
 }
-export async function setGameDetails(platform,gameSlug,{titles,descriptions,languages,maker}){
+export async function setGameDetails(platform,gameSlug,{titles,descriptions,languages,maker,genre,tags}){
   const texts=()=>platform.request(`/api/developer/language-files/${encodeURIComponent(gameSlug)}`,{method:'PATCH',body:{...(titles?{titles}:{}),...(descriptions?{descriptions}:{}),...(languages?{languages}:{})}});
-  if(!maker)return texts();
-  // 制作信息 saves separately; only the given fields change.
+  const relabel=genre!==undefined||tags!==undefined;
+  if(!maker&&!relabel)return texts();
   const result=titles||descriptions||languages?await texts():{ok:true};
   if(result?.error)return result;
-  const saved=await platform.request(`/api/games/${encodeURIComponent(gameSlug)}/details`,{method:'POST',body:{makerChanges:maker}});
-  return saved?.ok===true?{...result,maker:{saved:true}}:{...result,maker:{saved:false,error:saved?.error||'制作信息暂时没保存上，请重试。'}};
+  // 分类和标签 the author asked to change (the edit page's labels): both are saved together, so the one not given keeps its current value.
+  let labels;
+  if(relabel){
+    const current=genre!==undefined&&tags!==undefined?null:await getGameMaterials(platform,gameSlug);
+    if(current?.error)return {...result,labels:{saved:false,error:current.error}};
+    labels={genre:genre??current?.labels?.genre??null,tags:tags??current?.labels?.tags??[]};
+  }
+  // 制作信息 and labels save separately from the texts; only the given maker fields change.
+  const saved=await platform.request(`/api/games/${encodeURIComponent(gameSlug)}/details`,{method:'POST',body:{...(maker?{makerChanges:maker}:{}),...(labels?{labels}:{})}});
+  const outcome=saved?.ok===true?{saved:true}:{saved:false,error:saved?.error||'暂时没保存上，请重试。'};
+  return {...result,...(maker?{maker:outcome}:{}),...(labels?{labels:{...outcome,...(outcome.saved?labels:{})}}:{})};
 }

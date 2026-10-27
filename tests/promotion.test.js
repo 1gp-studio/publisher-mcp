@@ -6,9 +6,10 @@ import { join } from 'node:path';
 import { preparePromotion } from '../src/promotion.js';
 import { testSymlink } from './helpers/symlink.js';
 
-const keys = ['genre', 'tags', 'mainCover', 'screenshots', 'preview'];
+const keys = ['genre', 'tags', 'maker', 'mainCover', 'screenshots', 'preview'];
 const existing = materials => ({ gameSlug: 'test-game', materials });
-const emptyMaterials = () => ({ original: { locale: 'zh' }, labels: { genre: null, tags: [] }, media: {
+const emptyMaterials = () => ({ original: { locale: 'zh' }, labels: { genre: null, tags: [] },
+  maker: { tools: [], orientation: null, session: null, allowRemix: false, notes: '' }, media: {
   mainCover: { src: null, source: 'missing', missing: true },
   screenshots: { items: [], fallback: [], count: 0, max: 20, missing: true },
   preview: { src: null, kind: null, missing: true, disabled: false },
@@ -41,10 +42,11 @@ test('new games get an actionable five-part checklist without guessing metadata 
     assert.equal(item.candidate, undefined); assert.ok(item.nextStep.length > 10);
   }
   assert.deepEqual(result.availableGenres, ['casual', 'puzzle', 'action', 'strategy', 'simulation', 'adventure', 'idle', 'rhythm']);
-  assert.deepEqual(result.capabilities, { generatesImages: false, capturesScreenshots: false, recordsVideo: false, requiresHostTools: true });
+  assert.deepEqual(result.capabilities, { generatesImages: false, capturesScreenshots: true, recordsVideo: true, recorder: 'record_game_video', requiresHostTools: false });
   assert.deepEqual(result.items.screenshots.suggestedCount, { min: 3, max: 5 });
-  assert.deepEqual(result.items.preview.suggestedSeconds, { min: 12, max: 18 });
-  assert.match(result.items.preview.nextStep, /不强制接管时钟/);
+  assert.equal(result.items.preview.suggestedSeconds, undefined);
+  assert.match(result.items.preview.nextStep, /record_game_video/); assert.match(result.items.preview.nextStep, /不超过 5 MB/);
+  assert.match(result.items.screenshots.nextStep, /至少 3 张真实截图/);
 });
 
 test('a bounded kit supplies reusable metadata and relative media candidates, never completion or executable instructions', async t => {
@@ -57,7 +59,7 @@ test('a bounded kit supplies reusable metadata and relative media candidates, ne
   assert.equal(result.localKit.state, 'available');
   assert.deepEqual(result.localKit.metadata, { genre: 'puzzle', tags: ['三消', '像素风'], tagsEn: ['Match-3', 'Pixel art'] });
   assert.deepEqual(result.missing, keys);
-  for (const item of Object.values(result.items)) { assert.equal(item.state, 'local_candidate'); assert.equal(item.verified, false); }
+  for (const [key, item] of Object.entries(result.items)) { assert.equal(item.state, key === 'maker' ? 'prepare_needed' : 'local_candidate'); assert.equal(item.verified, false); }
   assert.equal(result.items.mainCover.candidate.relativePath, '1gp-kit/cover.png');
   assert.equal(result.items.mainCover.candidate.requiresCompression, true);
   assert.equal(result.items.mainCover.candidate.contentTypeVerified, false);
@@ -75,6 +77,7 @@ test('live materials dynamically remove missing items and preserve curated scree
   const before = await preparePromotion(f.root, existing(materials));
   assert.deepEqual(before.missing, keys);
   materials.labels = { genre: 'action', genreSource: 'curated', tags: ['像素风'] };
+  materials.maker = { tools: ['Claude Code'], orientation: 'portrait', session: 'short', allowRemix: false, notes: '' };
   materials.media.mainCover = { src: 'https://platform.example/game-covers/test.webp', source: 'curated', missing: false };
   materials.media.screenshots = { items: [], count: 0, fallback: [{ src: 'https://platform.example/shots/01.webp', width: 800, height: 600 }], missing: false };
   materials.media.preview = { src: 'https://platform.example/game-previews/test.gif', kind: 'image', disabled: false, missing: false };
@@ -104,8 +107,9 @@ test('one or two uploaded screenshots suggest additions and do not count hidden 
     assert.equal(result.items.screenshots.platform.source, 'uploaded');
     assert.equal(result.items.screenshots.additionalSuggested, 3 - count);
     assert.equal(result.items.screenshots.replacementWarning, undefined);
-    if (count < 3) assert.match(result.items.screenshots.nextStep, /建议补充不同实机状态达到 3–5 张/);
-    else assert.doesNotMatch(result.items.screenshots.nextStep, /建议补充/);
+    if (count < 3) assert.match(result.items.screenshots.nextStep, /首发需要至少 3 张，补充不同实机状态达到 3–5 张/);
+    else assert.doesNotMatch(result.items.screenshots.nextStep, /补充/);
+    assert.equal(result.requiredMissing.includes('screenshots'), count < 3, 'fewer than 3 author screenshots do not meet the first launch');
   }
 });
 
@@ -121,7 +125,7 @@ test('existing author values and a disabled preview take precedence over local c
   assert.equal(result.items.preview.state, 'author_disabled');
   assert.equal(result.items.preview.verificationRequired, false);
   assert.equal(result.items.preview.candidate.relativePath, '1gp-kit/preview.gif');
-  assert.deepEqual(result.missing, ['mainCover', 'screenshots']);
+  assert.deepEqual(result.missing, ['maker', 'mainCover', 'screenshots']);
   assert.match(result.items.preview.nextStep, /只有明确要求才重新开启/);
 });
 
@@ -135,8 +139,9 @@ test('mixed-genre tags remain valid candidates while a saved primary category ke
   assert.match(newGame.items.tags.nextStep, /classification/);
   assert.match(newGame.classification, /只避开与当前主分类重复/);
   assert.match(newGame.classification, /不因为简单易上手就归休闲/);
-  assert.deepEqual(newGame.required, ['genre', 'tags', 'mainCover']);
-  assert.equal(newGame.items.screenshots.optional, true); assert.equal(newGame.items.mainCover.optional, false);
+  assert.deepEqual(newGame.required, ['genre', 'tags', 'mainCover', 'maker', 'screenshots']);
+  assert.equal(newGame.items.screenshots.optional, false); assert.equal(newGame.items.maker.optional, false);
+  assert.equal(newGame.items.mainCover.optional, false); assert.equal(newGame.items.preview.optional, true);
 
   materials.labels = { genre: 'idle', genreSource: 'creator', tags: ['RPG'] };
   const saved = await preparePromotion(f.root, existing(materials));
@@ -155,7 +160,8 @@ test('remote read errors and missing old-server fields remain unknown even with 
     const result = await preparePromotion(f.root, existing(materials));
     assert.deepEqual(result.unknown, keys); assert.deepEqual(result.missing, []);
     for (const item of Object.values(result.items)) {
-      assert.equal(item.state, 'unknown'); assert.ok(item.candidate); assert.equal(item.verified, false);
+      assert.equal(item.state, 'unknown'); assert.equal(item.verified, false);
+      if (item !== result.items.maker) assert.ok(item.candidate);
       assert.match(item.nextStep, /不能证明线上为空/);
     }
   }
@@ -169,7 +175,7 @@ test('incomplete or contradictory individual platform fields are unknown without
   materials.media.preview = { src: 'javascript:alert(1)', missing: false, disabled: false };
   const result = await preparePromotion(f.root, existing(materials));
   assert.deepEqual(result.unknown, ['genre', 'mainCover', 'screenshots', 'preview']);
-  assert.deepEqual(result.missing, ['tags']);
+  assert.deepEqual(result.missing, ['tags', 'maker']);
   assert.equal(result.items.tags.state, 'prepare_needed');
   assert.doesNotMatch(JSON.stringify(result), /javascript:|unknown-type/);
 });

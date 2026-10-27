@@ -57,6 +57,9 @@ test('translations-only upload reads the real registered original and returns fi
   assert.deepEqual(result.gameNames.filled, ['ja']);
   assert.deepEqual(calls.map(call => call.method), ['GET', 'PUT', 'GET']);
   assert.deepEqual(calls[1], { method: 'PUT', path: '/api/developer/language-files/my-game', body: { locale: 'ja', entries: { start: '開始 {0}' }, kind: 'translation', by: 'ai_creator', expectedOriginal: { locale: 'zh', hash: createHash('sha256').update(JSON.stringify([['start', '开始 {0}']])).digest('hex') } } });
+  // The author asked to replace lines they had edited on the site too: sent as the creator's own text.
+  await uploadGameText(platform, directory, 'my-game', undefined, [translation], { replaceEdited: true });
+  assert.equal(calls.at(-2).body.by, 'creator');
 });
 
 test('translations-only upload checks placeholders, line breaks, separators and local width limits before any write', async t => {

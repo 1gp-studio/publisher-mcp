@@ -52,7 +52,7 @@ test('preparation is local and durable; deployed updates require explicit resume
   assert.ok(f.requests.every(r => r.options.body.updateId === first.id));
   // The public site differs from the default MCP transport host; this is a real successful response.
   assert.equal((await f.complete(first.id)).status, 'published');
-  assert.deepEqual(f.requests.at(-1).options.body, { title, notes, approved: true });
+  assert.deepEqual(f.requests.at(-1).options.body, { title, notes, approved: true, post: false }, 'Completion records the version and sends no post');
   f.state.completed = true;
   assert.equal((await f.complete(first.id)).created, false, 'Retry after cleanup reaches the same server id');
   assert.notEqual((await f.prepare()).id, first.id);
@@ -219,7 +219,6 @@ test('the actual nested publish tracking wrapper notices credential changes befo
 test('malformed completion, unready errors, removed posts and uncertain responses preserve recovery state', async t => {
   const f = await fixture(t), first = await f.prepare(); await f.publish(first.id);
   const invalid = [
-    { updateId: first.id, gameSlug: 'owned-game', status: 'published', created: true, post: null },
     { updateId: postId, gameSlug: 'owned-game', status: 'launch_skipped', created: true, post: null },
     { updateId: first.id, gameSlug: 'other-game', status: 'launch_skipped', created: true, post: null },
     { updateId: first.id, gameSlug: 'owned-game', status: 'pending', created: true, post: null },

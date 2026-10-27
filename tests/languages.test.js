@@ -7,7 +7,7 @@ import { createServer } from 'node:http';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { Platform } from '../src/platform.js';
-import { checkGameLanguages,uploadGameText,siteLanguages,supportedGameLanguages } from '../src/languages.js';
+import { checkGameLanguages,uploadGameText,siteLanguages,supportedGameLanguages,setGameDetails } from '../src/languages.js';
 import { automaticPublishPrompt,localPublishPrompt,dockerPublishPrompt,multilingualPrompt,updateGamePrompt } from '../src/publishing-prompts.js';
 import packageInfo from '../package.json' with { type: 'json' };
 
@@ -112,12 +112,12 @@ test('game text upload sends the original first, then translations as the creato
  assert.match(outside.error,/项目目录/);
 });
 test('game details send names and descriptions per language in one request',async()=>{
- const { setGameDetails }=await import('../src/languages.js');
+
  const calls=[];await setGameDetails({request:async(path,options)=>{calls.push([path,options]);return {ok:true};}},'my-game',{titles:{ja:'猫'},descriptions:{ja:'釣りをする猫'}});
  assert.deepEqual(calls,[['/api/developer/language-files/my-game',{method:'PATCH',body:{titles:{ja:'猫'},descriptions:{ja:'釣りをする猫'}}}]]);
 });
 test('maker details save only the given fields, alone or after names',async()=>{
- const { setGameDetails }=await import('../src/languages.js');
+
  const calls=[];const platform={request:async(path,options)=>{calls.push([path,options]);return {ok:true};}};
  assert.deepEqual(await setGameDetails(platform,'my-game',{maker:{tools:['Claude Code'],orientation:'portrait'}}),{ok:true,maker:{saved:true}});
  assert.deepEqual(calls,[['/api/games/my-game/details',{method:'POST',body:{makerChanges:{tools:['Claude Code'],orientation:'portrait'}}}]]);
@@ -128,4 +128,17 @@ test('maker details save only the given fields, alone or after names',async()=>{
  assert.deepEqual(failed.maker,{saved:false,error:'只能修改自己的游戏信息。'});
  const stopped=[];assert.equal((await setGameDetails({request:async path=>{stopped.push(path);return {error:'bad'};}},'my-game',{titles:{ja:''},maker:{session:'long'}})).error,'bad');
  assert.equal(stopped.length,1,'a failed name change does not go on to the maker details');
+});
+
+test('genre and tags without fillMissing replace the labels; the one not given keeps its current value',async()=>{
+ const calls=[];const platform={request:async(path,options)=>{calls.push([path,options]);return path.includes('game-materials')?{game:{slug:'my-game'},original:{},languages:[],covers:{},labels:{genre:'puzzle',tags:['像素','解谜']}}:{ok:true};}};
+ const both=await setGameDetails(platform,'my-game',{genre:'action',tags:['动作']});
+ assert.deepEqual(both,{ok:true,labels:{saved:true,genre:'action',tags:['动作']}});
+ assert.deepEqual(calls,[['/api/games/my-game/details',{method:'POST',body:{labels:{genre:'action',tags:['动作']}}}]],'both given: no read first');
+ calls.length=0;
+ const tagsOnly=await setGameDetails(platform,'my-game',{tags:['像素','单手'],maker:{session:'short'}});
+ assert.deepEqual(calls.at(-1),['/api/games/my-game/details',{method:'POST',body:{makerChanges:{session:'short'},labels:{genre:'puzzle',tags:['像素','单手']}}}]);
+ assert.deepEqual(tagsOnly.labels,{saved:true,genre:'puzzle',tags:['像素','单手']});
+ const unread=await setGameDetails({request:async path=>path.includes('game-materials')?{error:'读不到'}:{ok:true}},'my-game',{genre:'idle'});
+ assert.deepEqual(unread.labels,{saved:false,error:'读不到'});
 });

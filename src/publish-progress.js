@@ -28,7 +28,7 @@ export function withMaterialNextSteps(data, fallbackSlug) {
     '用 set_game_media 上传已检查的主封面、实机截图和可选预览；从本地 kit 复用真实文件，缺少时由宿主 AI 截图、录制或准备合适素材，不编造游戏画面。保留已有封面、截图和作者关闭预览的选择。',
     '若作者已选择多语言，继续补缺的文案和同一无字底图上的本地化游戏名封面；保留作者选择，未选择的可选功能不自动开启。',
     '重新读取 get_game_materials，并实际查看公开封面和截图、播放预览、检查网页和必要接口；部分失败或缺项要明确报告，不能把部署 ready 当作全部完成。',
-    `纯元数据或媒体补充无需再次部署。沿用同一 update_id。${updateApprovalGuidance.zh}${updateHistoryGuidance.zh}首发宣传仅按作者已批准的相同内容发布。`,
+    `纯元数据或媒体补充无需再次部署。沿用同一 update_id。${updateApprovalGuidance.zh}${updateHistoryGuidance.zh}首发不用收尾：首发部署的标题和说明就是第一条版本记录。`,
   ] };
 }
 

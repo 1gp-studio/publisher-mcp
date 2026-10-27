@@ -12,7 +12,7 @@ import { preparePromotion } from './promotion.js';
 import { prepareGameUpdate } from './game-updates.js';
 import packageInfo from '../package.json' with { type: 'json' };
 
-const featureNames = ['multilingual', 'cloudSaves', 'leaderboards', 'announcement'];
+const featureNames = ['multilingual', 'cloudSaves', 'leaderboards'];
 const cleanChoices = input => Object.fromEntries(featureNames.filter(key => input && Object.hasOwn(input, key) && typeof input[key] === 'boolean').map(key => [key, input[key]]));
 async function preferenceDirectory(path, create = false) {
   if (typeof path !== 'string' || !isAbsolute(path)) throw new Error('Invalid options directory');
@@ -118,15 +118,15 @@ export async function prepareGame(platform, projectDirectory, options = {}) {
   return { project_directory: root, ...release, inspection, languageCheck, integrations, materials, textSources, promotion, publisherVersion: packageInfo.version, features: requested,
     ...(update?.error ? { updateWarning: update } : update ? { updateId: update.id, update } : {}),
     ...(preferenceWarning ? { preferenceWarning } : {}),
-    // Only the launch post is asked before publishing; the rest is offered once the game is live.
-    decisions: requested.announcement === null && release.channel === 'new' ? ['announcement'] : [],
+    // Nothing is asked before publishing; optional features are offered once the game is live.
+    decisions: [],
     optionalFeatures: [...['multilingual', 'cloudSaves', 'leaderboards'].filter(name => requested[name] !== true),
-      ...['screenshots', 'preview'].filter(key => ['prepare_needed', 'local_candidate'].includes(promotion.items[key]?.state))],
+      ...['preview'].filter(key => ['prepare_needed', 'local_candidate'].includes(promotion.items[key]?.state))],
     instructions: `${release.instructions}
 准备结果已包含游戏识别、发布渠道、项目检查和语言检查，不必再单独 find_my_game、prepare_release 或 check_game_languages；源码或配置改变后只重查相关项。
-首发只需要 promotion.required 里的分类、主语言标签和主封面：依据代码和实玩证据用 set_game_details 只补缺失 genre/tags，用 set_game_media 上传核对过的主封面；截图和预览可以上线后再补，有现成素材或工具时顺手上传。复用已有素材，保留作者关闭预览；MCP 不自带截图、图像或视频生成，缺少宿主工具时如实说明。平台物料状态未知先恢复读取，上传成功或部署 ready 都不能代替实际查看。
-发布前只问 decisions 里的事：首次发布时问一次要不要顺手发首发社区帖（announcement 只记意向，帖子内容另需作者认可，可与物料一起确认）。多语言、云存档、排行榜不在发布前追问；已开启的照常沿用，作者主动要求时才接入。features 是作者意向，不代表已接入；false 不会关闭已有功能。发布完成后按 optionalFeatures 简短提醒作者还有哪些可选功能没用上，说明可以帮忙接入或补齐，由作者决定。
+首发需要 promotion.required 里的分类、主语言标签、主封面、制作信息和至少 3 张真实截图：依据代码和实玩证据用 set_game_details 只补缺失 genre/tags 并填 maker，用 set_game_media 上传核对过的主封面和截图；预览可选，上线后问作者要不要做宣传视频。复用已有素材，保留作者关闭预览；截图和视频可用 record_game_video，MCP 不生成图片，缺少工具时如实说明。平台物料状态未知先恢复读取，上传成功或部署 ready 都不能代替实际查看。截图、主封面、预览、各语言封面、名字简介、分类标签和制作信息以后都能按作者要求修改（set_game_media 的 replaceCover/replacePreview/replaceScreenshots、edit_game_media、set_game_covers、set_game_details）。
+发布前不追问可选功能：多语言、云存档、排行榜已开启的照常沿用，作者主动要求时才接入。features 是作者意向，不代表已接入；false 不会关闭已有功能。发布完成后按 optionalFeatures 简短提醒作者还有哪些可选功能没用上，说明可以帮忙接入或补齐，由作者决定。
 云存档/排行榜只在作者选择后用配置工具和专属接入说明修改游戏；配置接口失败先解决，不把未知当未启用。textSources 只读展示自动文字同步配置，读取失败表示不可用，不表示关闭；configure_game_text_source 只登记文件并有限扫描，不构建、不发布；待审候选逐项核对后按 source_fingerprint 批准。多语言包括游戏文字、名字、简介和同一底图叠加译名的自动封面，保留作者已有设置。
-新游戏必须先发布以获得真实 ID 时，之后接入功能的部署沿用本次 updateId，不编造 ID 或宣称已接通。重查或记住 features 时传同一 update_id；所有渠道发布都带 release.updateId。只改平台语言文件、名称、简介、封面或配置时不重新发布。中间部署不发社区日志，首发组不生成更新日志；版本公告按上文规则先经作者认可。更新不自动发首发宣传帖；宣传或收尾失败只重试同一项，不重发游戏。发布返回 build ID 后用 wait_for_publish 继续；结果不明不重复发布。`,
+新游戏必须先发布以获得真实 ID 时，之后接入功能的部署沿用本次 updateId，不编造 ID 或宣称已接通。重查或记住 features 时传同一 update_id；所有渠道发布都带 release.updateId。只改平台语言文件、名称、简介、封面或配置时不重新发布。中间部署合并成一条版本记录；首发不用收尾，首发部署的标题和说明就是第一条版本记录。发布或更新后主动问作者：要不要把这版写进版本记录、要不要再发一篇社区帖（create_game_post），都附上拟好的草稿；作者同意哪项才做哪项。收尾失败只重试收尾，不重发游戏。发布返回 build ID 后用 wait_for_publish 继续；结果不明不重复发布。`,
   };
 }

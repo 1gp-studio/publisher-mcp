@@ -5,7 +5,7 @@ import { mkdtemp, mkdir, writeFile, rm, link, open, rename } from 'node:fs/promi
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import sharp from 'sharp';
-import { setGameMedia } from '../src/media.js';
+import { editGameMedia, setGameMedia } from '../src/media.js';
 import { readProjectFile, inspectProjectFile } from '../src/media-files.js';
 import { testSymlink } from './helpers/symlink.js';
 
@@ -216,4 +216,69 @@ test('replaceCover uploads the reviewed cover as the new main cover; it needs an
   const kept = await setGameMedia(f.platform, f.project, 'owned-game', { cover: 'cover.png' });
   assert.equal(f.calls.at(-1).path, '/api/games/owned-game/cover?fillMissing=true', 'Without replaceCover the main cover is only filled');
   assert.equal(kept.ok, true);
+});
+
+test('replacePreview uploads the reviewed preview without fillMissing; it needs an explicit true and a preview', async t => {
+  const f = await fixture(t);
+  t.mock.method(globalThis, 'fetch', async () => new Response('{}', { status: 200 }));
+  const replaced = await setGameMedia(f.platform, f.project, 'owned-game', { preview: 'preview.gif', replacePreview: true });
+  assert.equal(replaced.ok, true);
+  assert.deepEqual(f.calls.map(call => call.options.body.fillMissing), [false, false], 'sign and complete both replace');
+  assert.match(replaced.message, /替换预览/);
+  for (const input of [{ cover: 'cover.png', replacePreview: true }, { preview: 'preview.gif', replacePreview: false }]) {
+    const calls = f.calls.length, result = await setGameMedia(f.platform, f.project, 'owned-game', input);
+    assert.equal(result.code, 'INVALID_MEDIA'); assert.equal(f.calls.length, calls);
+  }
+});
+
+test('edit_game_media deletes screenshots, orders the given ids first and takes the preview down', async () => {
+  const ids = ['a', 'b', 'c', 'd'].map(c => `${c.repeat(8)}-${c.repeat(4)}-4${c.repeat(3)}-8${c.repeat(3)}-${c.repeat(12)}`);
+  let shots = [...ids];
+  const calls = [];
+  const platform = { token: async () => 'token', request: async (path, options = {}) => {
+    calls.push({ path, method: options.method ?? (options.body ? 'POST' : 'GET'), body: options.body });
+    if (options.method === 'DELETE') {
+      const id = new URL(path, 'https://x').searchParams.get('id');
+      if (!shots.includes(id)) return { error: '找不到这张截图。', code: 'PLATFORM_ERROR', status: 404 };
+      shots = shots.filter(item => item !== id); return { ok: true };
+    }
+    if (path.startsWith('/api/developer/game-materials/')) return { media: { screenshots: { items: shots.map(id => ({ id })) } } };
+    if (options.method === 'PATCH') { shots = options.body.order; return { ok: true }; }
+    return { ok: true };
+  } };
+  const result = await editGameMedia(platform, 'owned-game', { removeScreenshots: [ids[0], 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee'], screenshotOrder: [ids[3]], removePreview: true });
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.removedScreenshots, [ids[0]]);
+  assert.deepEqual(result.notFound, ['eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee'], 'An already removed screenshot is reported, not an error');
+  assert.deepEqual(result.screenshotOrder, [ids[3], ids[1], ids[2]], 'Ids not listed keep their order after the given ones');
+  assert.equal(result.previewRemoved, true);
+  assert.deepEqual(calls.at(-1), { path: '/api/games/owned-game/preview', method: 'POST', body: { action: 'remove' } });
+
+  const unknown = await editGameMedia(platform, 'owned-game', { screenshotOrder: [ids[0]] });
+  assert.equal(unknown.code, 'UNKNOWN_SCREENSHOT');
+  for (const input of [{}, { removeScreenshots: ['not-an-id'] }, { removePreview: false }, { removeScreenshots: [ids[1]], screenshotOrder: [ids[1]] }]) {
+    const count = calls.length, rejected = await editGameMedia(platform, 'owned-game', input);
+    assert.equal(rejected.code, 'INVALID_MEDIA'); assert.equal(calls.length, count, 'Rejected before any request');
+  }
+});
+
+test('replaceScreenshots swaps the whole set for the given pictures, in order', async t => {
+  const f = await fixture(t);
+  const old = ['aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'];
+  let shots = [...old];
+  const edits = [];
+  const upload = f.platform.request;
+  const bytes = f.platform.uploadBytes;
+  f.platform.uploadBytes = async (...args) => { const data = await bytes(...args); if (data.id && !shots.includes(data.id)) shots.push(data.id); return data; };
+  f.platform.request = async (path, options = {}) => {
+    if (path.startsWith('/api/developer/game-materials/')) return { media: { screenshots: { items: shots.map(id => ({ id })) } } };
+    if (options.method === 'DELETE') { const id = new URL(path, 'https://x').searchParams.get('id'); shots = shots.filter(item => item !== id); edits.push(['delete', id]); return { ok: true }; }
+    if (options.method === 'PATCH') { edits.push(['order', options.body.order]); return { ok: true }; }
+    return upload(path, options);
+  };
+  const result = await setGameMedia(f.platform, f.project, 'owned-game', { screenshots: ['shot.png'], replaceScreenshots: true });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.deepEqual(edits.filter(([kind]) => kind === 'delete').map(([, id]) => id), old, 'the old screenshots are removed after the new one is in');
+  assert.deepEqual(edits.at(-1), ['order', [mediaId]]);
+  assert.equal((await setGameMedia(f.platform, f.project, 'owned-game', { replaceScreenshots: true })).code, 'INVALID_MEDIA');
 });

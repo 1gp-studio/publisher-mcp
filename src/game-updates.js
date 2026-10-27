@@ -1,6 +1,5 @@
 import { createHash, randomUUID, randomBytes } from 'node:crypto';
 import { isPlatformOrigin } from './platform-origins.js';
-import { uploadPostImage } from './post-images.js';
 import { constants } from 'node:fs';
 import { lstat, mkdir, open, realpath, rename, unlink } from 'node:fs/promises';
 import { isAbsolute, join, parse, resolve, sep } from 'node:path';
@@ -133,14 +132,16 @@ export async function publishGameUpdate(platform, { projectDirectory, gameSlug, 
     catch { return storageError(); }
   }
   const result = await submit(client);
-  return { ...result, updateId, nextUpdateStep: '完成所有选定功能、必要修复和最终网页检查后，把最终版本标题和说明给作者确认；只有作者明确批准相同内容后才调用 complete_game_update(approved=true)。部署授权不等于更新公告授权；中间部署不发社区日志。' };
+  return { ...result, updateId, nextUpdateStep: '完成所有选定功能、必要修复和最终网页检查后，问作者要不要把这次写进版本记录（附上拟好的标题和说明），同意后调用 complete_game_update(approved=true)；再问要不要顺手发帖，要的话用 create_game_post。中间部署合成一条版本记录。' };
 }
 
 /** Finalize once; losing the response or deleting the post must never cause another deployment. */
-export async function completeGameUpdate(platform, projectDirectory, { updateId, title, notes, approved, image }) {
+// Writes the approved final title and notes into the game's version history (版本更新, 首页动态,
+// 更新榜). It sends no community post; the author asks for one with create_game_post.
+export async function completeGameUpdate(platform, projectDirectory, { updateId, title, notes, approved }) {
   if (!uuid(updateId) || typeof title !== 'string' || !title.trim() || title.trim().length > 120 || typeof notes !== 'string' || !notes.trim() || notes.trim().length > 4000) return failure('INVALID_UPDATE', '需要真实 update_id 和最终合并的标题、说明。');
-  if (approved !== true) return failure('APPROVAL_REQUIRED', `请先把这份最终版本标题和说明${image === undefined ? '' : '，以及随帖附上的图片'}给作者确认；明确批准相同内容后才发布更新公告。部署授权不等于公告授权。`,
-    { draft: { title: title.trim(), notes: notes.trim(), ...(image === undefined ? {} : { image }) } });
+  if (approved !== true) return failure('APPROVAL_REQUIRED', '请先把这份版本标题和说明给作者看，作者同意后再写进游戏页「版本更新」。',
+    { draft: { title: title.trim(), notes: notes.trim() } });
   const token = await platform.token?.();
   if (!token) return failure('AUTH_REQUIRED', '请先连接 AIWANNA 账号。');
   let store, value;
@@ -149,17 +150,9 @@ export async function completeGameUpdate(platform, projectDirectory, { updateId,
   // An explicit completed id can still be retried after its active record was cleared.
   if (value && value.id !== updateId) return failure('UPDATE_MISMATCH', '本项目当前记录属于另一个更新，请核对 update_id。');
   if (await currentToken(platform) !== token) return changed();
-  // The picture is uploaded for this update first; the same file always gives the same reference,
-  // so a retry with the same image matches the completed post.
-  let picture;
-  if (image !== undefined) {
-    const uploaded = await uploadPostImage(platform, projectDirectory, image, `update:${updateId}`, token);
-    if (uploaded.error) return uploaded;
-    picture = uploaded.image;
-  }
   let data;
-  try { data = await platform.request(`/api/developer/game-updates/${updateId}/complete`, { method: 'POST', token, body: { title: title.trim(), notes: notes.trim(), approved: true, ...(picture ? { image: picture } : {}) } }); }
-  catch { return failure('UPDATE_STATUS_UNKNOWN', '收尾结果不明；仅用相同 update_id、title、notes 和 image 重试 complete_game_update，不要重发游戏。', { updateId }); }
+  try { data = await platform.request(`/api/developer/game-updates/${updateId}/complete`, { method: 'POST', token, body: { title: title.trim(), notes: notes.trim(), approved: true, post: false } }); }
+  catch { return failure('UPDATE_STATUS_UNKNOWN', '收尾结果不明；仅用相同 update_id、title 和 notes 重试 complete_game_update，不要重发游戏。', { updateId }); }
   if (data?.error) return data;
   const validPost = data?.post && uuid(data.post.id) && typeof data.post.url === 'string' && (() => { try {
     const url = new URL(data.post.url);
@@ -167,7 +160,7 @@ export async function completeGameUpdate(platform, projectDirectory, { updateId,
     return isPlatformOrigin(url.origin, platform.origin) && !url.username && !url.password;
   } catch { return false; } })();
   if (data?.updateId !== updateId || !slug(data.gameSlug) || typeof data.created !== 'boolean'
-    || !['published', 'launch_skipped', 'restricted_skipped'].includes(data.status) || (data.status === 'published' ? !validPost : data.post !== null)
+    || !['published', 'launch_skipped', 'restricted_skipped'].includes(data.status) || (data.post !== null && !validPost) || (data.status !== 'published' && data.post !== null)
     || value?.gameSlug && data.gameSlug !== value.gameSlug) return failure('PLATFORM_ERROR', '收尾返回状态无效，保留本地记录；只重查同一更新，不要重发游戏。', { updateId });
   if (await currentToken(platform) !== token) return { ...data, warning: changed() };
   try {
