@@ -6,9 +6,9 @@
 
 需要 Node.js 24+、npm 和 Git，并且能访问 GitHub：首次安装由 npx 从 GitHub 下载本项目。游戏本身不需要 Git 仓库。这是标准的 stdio MCP 服务，任何 MCP 客户端都能使用。
 
-**只装一次，装在用户级。** 一份安装对你所有的游戏项目都有效，不要在每个游戏项目里各装一份，也不要在游戏目录里新建 `.mcp.json`。固定版本不会自行升级：先读取实际 MCP 握手 `serverInfo.version`，或调用 `get_publisher_info`；本流程需要 **0.12.1 或更高兼容版本**。低版本只更新当前客户端已有 AIWANNA 配置里的固定版本，保留其他参数、环境配置和授权凭证；更高兼容版本不降级。
+**只装一次，装在用户级。** 一份安装对你所有的游戏项目都有效，不要在每个游戏项目里各装一份，也不要在游戏目录里新建 `.mcp.json`。从 v0.16.0 起会自动更新：启动时、约每 10 分钟、每次调用 `get_publisher_info` 时对照平台推荐版本，有新版就自动换上（正在进行的调用在旧进程里做完）。实际运行版本以 `get_publisher_info` 为准（它会先等更新完成再回答）；握手 `serverInfo.version` 是更新前的，不作数。本流程需要 **0.16.0 或更高兼容版本**。低于 0.16.0（或 `upgrade.automatic` 为 false）时，只把当前客户端已有 AIWANNA 配置里的固定版本改成 `v0.16.0`，保留其他参数、环境配置和授权凭证，这是最后一次手动升级；更高兼容版本不降级。设置环境变量 `ONEGP_MCP_AUTO_UPDATE=0` 可关闭自动更新。
 
-更新后重新加载 MCP，再核对实际运行版本和工具；客户端无法重载时才请用户重启。配置已经写成新版、工具名称已经存在，都不能证明旧进程已经升级。读不到版本时说明情况，不假定已经完成。
+手动改版本号后重新加载 MCP，再用 `get_publisher_info` 核对实际运行版本和工具；客户端无法重载时才请用户重启。配置已经写成新版、工具名称已经存在，都不能证明旧进程已经升级。自动更新后，Claude Code 会在同一个对话里刷新工具；不刷新工具列表的客户端（可能包括 Codex）里，已有工具会用上新代码，新增的工具要重启或新开对话才出现。读不到版本时说明情况，不假定已经完成。
 
 如果某个游戏项目的 `.mcp.json` 里还有以前装的 `onegp`（项目级的会盖过用户级，版本停在旧的），请把那一项删掉，以免两个版本打架。
 
@@ -19,12 +19,12 @@
 ```toml
 [mcp_servers.onegp]
 command = "npx"
-args = ["--yes", "github:1gp-studio/publisher-mcp#v0.15.0"]
+args = ["--yes", "github:1gp-studio/publisher-mcp#v0.16.0"]
 startup_timeout_sec = 60
 tool_timeout_sec = 600
 ```
 
-保存并重新打开 Codex 任务。首次运行 npx 会下载本项目及依赖，需要网络访问。
+保存并重新打开 Codex 任务。首次运行 npx 会下载本项目及依赖，需要网络访问。装好 v0.16.0 后会自动更新，不用再改版本号；新增的工具要新开 Codex 任务才出现。
 
 配置字段依据 [Codex 官方配置文档](https://learn.chatgpt.com/docs/config-file/config-reference)。
 
@@ -33,12 +33,12 @@ tool_timeout_sec = 600
 在终端运行一次（`--scope user` 对你本人的所有项目生效）：
 
 ```sh
-claude mcp add onegp --scope user -- npx --yes github:1gp-studio/publisher-mcp#v0.15.0
+claude mcp add onegp --scope user -- npx --yes github:1gp-studio/publisher-mcp#v0.16.0
 ```
 
 已经装过时，用 `claude mcp list` 确认当前生效的配置，只更新其中固定的包版本；保留既有参数和环境配置，不删除 AIWANNA 的授权凭证。上面的命令用于首次安装，不需要每次发布都重新添加。
 
-重新打开 Claude Code。首次 npx 下载较慢，可用 `MCP_TIMEOUT=60000 claude` 启动以放宽启动超时。
+重新打开 Claude Code。首次 npx 下载较慢，可用 `MCP_TIMEOUT=60000 claude` 启动以放宽启动超时。装好 v0.16.0 后会自动更新，新工具在当前对话里就会出现，不用再改版本号或重启。
 
 ### 本地源码
 
@@ -242,6 +242,15 @@ MCP **负责检查、上传和保存，不生成图片**；截图和宣传视频
 平台目前限制全站同时 2 个构建、每个账号最多 50 个作品，不设每日次数限制。账号邮箱验证由 Supabase 负责；平台管理员必须配置生产邮件服务，才能支持组织外用户收取登录邮件。AIWANNA 托管团队的 Vercel 套餐及运行限制仍适用；不占用用户个人 Vercel 账号。GitHub 来源继续遵守仓库授权与构建限制。
 
 开发时可使用 `ONEGP_PLATFORM_URL` 指向另一 HTTPS 平台，或本机 HTTP localhost/127.0.0.1；凭证按平台分别保存。测试运行 `npm test`，包括真实 MCP stdio 客户端集成测试。
+
+## v0.16.0：自动更新
+
+- 最后一次手动升级：只把已有配置里的固定版本改成 `#v0.16.0`（其他参数、环境配置和授权凭证不动），然后重启客户端或重新加载 MCP。
+- 之后更新自己会来：启动时、约每 10 分钟、每次调用 `get_publisher_info` 时对照平台推荐版本（`/mcp/release.json`），有新版就自动换上，正在进行的调用在旧进程里做完。换完会通知客户端刷新工具（`notifications/tools/list_changed`），Claude Code 在同一个对话里就能用上新工具；换完后的第一条工具结果附一句提示。
+- 实际运行版本以 `get_publisher_info` 为准（它会先等更新完成再回答），握手 `serverInfo.version` 是更新前的。它的 `upgrade` 字段：自动更新下是 `{automatic:true, reloadRequired:false}`，旧版是 `{automatic:false, reloadRequired:true}`。
+- Codex 等不刷新工具列表的客户端：已有工具会用上新代码，新增的工具要重启或新开对话才出现。
+- 关闭自动更新：设置环境变量 `ONEGP_MCP_AUTO_UPDATE=0`。
+- 不需要迁移。
 
 ## v0.15.0：上传过的物料都能改
 

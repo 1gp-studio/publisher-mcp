@@ -1,10 +1,10 @@
 {
   "name": "@1gp-studio/publisher-mcp",
-  "version": "0.15.0",
+  "version": "0.16.0",
   "description": "Publish web games to 1GP Studio from MCP clients such as Codex and Claude Code",
   "type": "module",
   "bin": {
-    "1gp-publisher-mcp": "src/server.js"
+    "1gp-publisher-mcp": "src/start.js"
   },
   "files": [
     "src",
