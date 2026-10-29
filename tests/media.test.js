@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { mkdtemp, mkdir, writeFile, rm, link, open, rename } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -262,23 +262,125 @@ test('edit_game_media deletes screenshots, orders the given ids first and takes 
   }
 });
 
-test('replaceScreenshots swaps the whole set for the given pictures, in order', async t => {
-  const f = await fixture(t);
-  const old = ['aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'];
-  let shots = [...old];
-  const edits = [];
-  const upload = f.platform.request;
-  const bytes = f.platform.uploadBytes;
-  f.platform.uploadBytes = async (...args) => { const data = await bytes(...args); if (data.id && !shots.includes(data.id)) shots.push(data.id); return data; };
-  f.platform.request = async (path, options = {}) => {
-    if (path.startsWith('/api/developer/game-materials/')) return { media: { screenshots: { items: shots.map(id => ({ id })) } } };
-    if (options.method === 'DELETE') { const id = new URL(path, 'https://x').searchParams.get('id'); shots = shots.filter(item => item !== id); edits.push(['delete', id]); return { ok: true }; }
-    if (options.method === 'PATCH') { edits.push(['order', options.body.order]); return { ok: true }; }
-    return upload(path, options);
+async function replacementFixture(t) {
+  const f = await fixture(t), batches = new Map();
+  const state = { shots: Array.from({ length: 20 }, () => randomUUID()), loseCommit: false, failStage: false, afterBegin: null, afterStage: null, existing: new Map() };
+  const request = f.platform.request, upload = f.platform.uploadBytes;
+  f.platform.request = async (path, options) => {
+    if (!path.endsWith('/screenshots/replace')) return request(path, options);
+    f.calls.push({ kind: options.body.action, path, options });
+    const { replacementId: id, action, keys } = options.body;
+    let batch = batches.get(id);
+    if (!batch) {
+      assert.equal(action, 'begin');
+      batch = { expected: [...state.shots], items: keys.map(key => {
+        const reused = state.existing.has(key), id = state.existing.get(key) ?? randomUUID();
+        return { key, id, ready: reused, reused, src: `/api/game-shots/${gameId}/${id}.webp`, ...(reused ? { width: 32, height: 24 } : {}) };
+      }), complete: false, replacementId: id }; batches.set(id, batch);
+    }
+    if (JSON.stringify(state.shots) !== JSON.stringify(batch.complete ? batch.screenshotOrder : batch.expected)) return { code: 'SCREENSHOT_LIST_CHANGED', error: 'Concurrent edit', status: 409 };
+    if (batch.complete) return { ...batch, ok: true, replayed: true };
+    if (action === 'complete') {
+      assert.ok(batch.items.every(item => item.ready));
+      batch.screenshotOrder = batch.items.map(item => item.id);
+      batch.removedScreenshots = state.shots.filter(id => !batch.screenshotOrder.includes(id));
+      state.shots = [...batch.screenshotOrder]; batch.complete = true;
+      if (state.loseCommit) { state.loseCommit = false; return { code: 'NETWORK_ERROR', error: 'Lost response' }; }
+    } else await state.afterBegin?.(batch);
+    return { ...batch, ok: true };
   };
+  f.platform.uploadBytes = async (path, bytes, options) => {
+    if (!path.includes('/screenshots/replace?')) return upload(path, bytes, options);
+    f.calls.push({ kind: 'stage', path, bytes, options });
+    assert.equal(options.idempotencyKey, fingerprint(bytes));
+    const id = new URL(path, f.platform.origin).searchParams.get('replacementId'), batch = batches.get(id);
+    if (state.failStage) return { code: 'UPLOAD_FAILED', error: 'Storage unavailable' };
+    const item = batch.items.find(item => item.key === options.idempotencyKey);
+    item.ready = true; item.width = 32; item.height = 24;
+    await state.afterStage?.(item);
+    return { ok: true, replacementId: id, item };
+  };
+  return { ...f, replacementState: state, batches };
+}
+
+test('replacement validates every file before any API call, including a full old set and other selected media', async t => {
+  const f = await replacementFixture(t), old = [...f.replacementState.shots];
+  await writeFile(join(f.project, 'fake.png'), 'not an image');
+  for (const input of [{ screenshots: ['shot.png', 'missing.png'] }, { screenshots: ['shot.png', 'fake.png'] }, { screenshots: ['shot.png'], preview: 'missing.gif' }]) {
+    const result = await setGameMedia(f.platform, f.project, 'owned-game', { ...input, replaceScreenshots: true });
+    assert.equal(result.code, 'INVALID_MEDIA'); assert.equal(result.partial, false); assert.equal(f.calls.length, 0);
+    assert.deepEqual(f.replacementState.shots, old);
+  }
+  for (const input of [{}, { screenshots: ['shot.png'], replacementId: 'bad' }, { screenshots: Array(21).fill('shot.png') }]) {
+    assert.equal((await setGameMedia(f.platform, f.project, 'owned-game', { ...input, replaceScreenshots: true })).code, 'INVALID_MEDIA');
+  }
+});
+
+test('replacement stages 20 real files without deleting old screenshots, then commits the exact ordered set', async t => {
+  const f = await replacementFixture(t), old = [...f.replacementState.shots], paths = [];
+  for (let i = 0; i < 20; i++) { const path = `new-${i}.png`; paths.push(path); await writeFile(join(f.project, path), await image({ r: i * 10, g: 99, b: 33 })); }
+  f.replacementState.afterStage = async () => assert.deepEqual(f.replacementState.shots, old);
+  const result = await setGameMedia(f.platform, f.project, 'owned-game', { screenshots: paths, replaceScreenshots: true });
+  assert.equal(result.ok, true, JSON.stringify(result)); assert.equal(result.uploaded.length, 20);
+  assert.deepEqual(result.removedScreenshots, old); assert.deepEqual(result.screenshotOrder, result.uploaded.map(item => item.id));
+  assert.deepEqual(f.calls.map(call => call.kind), ['begin', ...Array(20).fill('stage'), 'complete']);
+  assert.ok(f.calls.every(call => call.options.token === f.state.token));
+});
+
+test('replacement preserves old screenshots on upload failure and resumes the same batch on retry', async t => {
+  const f = await replacementFixture(t), old = [...f.replacementState.shots];
+  f.replacementState.afterStage = async () => { f.replacementState.failStage = true; };
+  const input = { screenshots: ['shot.png', 'cover.png'], replaceScreenshots: true };
+  const failed = await setGameMedia(f.platform, f.project, 'owned-game', input);
+  assert.equal(failed.code, 'UPLOAD_FAILED'); assert.equal(failed.partial, false); assert.ok(failed.replacementId);
+  assert.deepEqual(f.replacementState.shots, old); assert.equal(f.calls.some(call => call.kind === 'complete'), false);
+  f.replacementState.failStage = false; f.replacementState.afterStage = null;
+  const result = await setGameMedia(f.platform, f.project, 'owned-game', { ...input, replacementId: failed.replacementId });
+  assert.equal(result.ok, true); assert.equal(f.batches.size, 1);
+  assert.equal(f.calls.filter(call => call.kind === 'stage').length, 3, 'already-staged first file is not reuploaded');
+  assert.equal(f.replacementState.shots.length, 2);
+});
+
+test('replacement uses captured bytes, deduplicates selected files and preserves existing IDs via server receipts', async t => {
+  const f = await replacementFixture(t);
+  // Use the ordinary normalizer to seed a receipt for the exact transmitted bytes.
+  const first = await setGameMedia(f.platform, f.project, 'owned-game', { screenshots: ['shot.png'] });
+  const key = f.calls[0].options.idempotencyKey;
+  f.replacementState.existing.set(key, first.uploaded[0].id); f.replacementState.shots[0] = first.uploaded[0].id;
+  f.calls.length = 0;
+  f.replacementState.afterBegin = async () => { await writeFile(join(f.project, 'cover.png'), 'modified after snapshot'); };
+  const result = await setGameMedia(f.platform, f.project, 'owned-game', { screenshots: ['shot.png', 'cover.png', 'shot.png'], replaceScreenshots: true });
+  assert.equal(result.ok, true); assert.equal(result.screenshotOrder[0], first.uploaded[0].id);
+  assert.equal(f.calls.filter(call => call.kind === 'stage').length, 1);
+  assert.ok(result.skipped.some(item => item.reason === 'DUPLICATE_SELECTION'));
+  assert.ok(result.skipped.some(item => item.id === first.uploaded[0].id));
+});
+
+test('lost commit response retries do not create a new batch or upload again, and stale retries cannot undo later edits', async t => {
+  const f = await replacementFixture(t), input = { screenshots: ['shot.png'], replaceScreenshots: true };
+  f.replacementState.loseCommit = true;
+  const unknown = await setGameMedia(f.platform, f.project, 'owned-game', input);
+  assert.equal(unknown.code, 'NETWORK_ERROR'); assert.ok(unknown.replacementId);
+  const committed = [...f.replacementState.shots];
+  const retry = await setGameMedia(f.platform, f.project, 'owned-game', { ...input, replacementId: unknown.replacementId });
+  assert.equal(retry.ok, true); assert.deepEqual(retry.screenshotOrder, committed); assert.equal(f.batches.size, 1);
+  assert.equal(f.calls.filter(call => call.kind === 'stage').length, 1);
+  f.replacementState.shots = [];
+  const stale = await setGameMedia(f.platform, f.project, 'owned-game', { ...input, replacementId: unknown.replacementId });
+  assert.equal(stale.code, 'SCREENSHOT_LIST_CHANGED'); assert.deepEqual(f.replacementState.shots, []);
+});
+
+test('replacement stops on account changes and never mixes credentials or commits an incomplete batch', async t => {
+  const f = await replacementFixture(t), old = [...f.replacementState.shots], token = f.state.token;
+  f.replacementState.afterStage = async () => { f.state.token = 'b'.repeat(64); };
+  const result = await setGameMedia(f.platform, f.project, 'owned-game', { screenshots: ['shot.png', 'cover.png'], replaceScreenshots: true });
+  assert.equal(result.code, 'ACCOUNT_CHANGED'); assert.deepEqual(f.replacementState.shots, old);
+  assert.deepEqual(f.calls.map(call => call.kind), ['begin', 'stage']); assert.ok(f.calls.every(call => call.options.token === token));
+});
+
+test('replacement rejects invalid server receipts without clearing existing media', async t => {
+  const f = await replacementFixture(t), old = [...f.replacementState.shots];
+  f.replacementState.afterBegin = async batch => { batch.items[0].src = 'https://evil.example/file.webp'; };
   const result = await setGameMedia(f.platform, f.project, 'owned-game', { screenshots: ['shot.png'], replaceScreenshots: true });
-  assert.equal(result.ok, true, JSON.stringify(result));
-  assert.deepEqual(edits.filter(([kind]) => kind === 'delete').map(([, id]) => id), old, 'the old screenshots are removed after the new one is in');
-  assert.deepEqual(edits.at(-1), ['order', [mediaId]]);
-  assert.equal((await setGameMedia(f.platform, f.project, 'owned-game', { replaceScreenshots: true })).code, 'INVALID_MEDIA');
+  assert.equal(result.code, 'PLATFORM_ERROR'); assert.deepEqual(f.replacementState.shots, old); assert.equal(f.calls.length, 1);
 });

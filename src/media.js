@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { fileTypeFromBuffer } from 'file-type';
 import sharp from 'sharp';
 import { readProjectFile } from './media-files.js';
@@ -100,33 +100,88 @@ async function uploadPreview(platform, slug, file, token, unchanged, fillMissing
  *  replaceCover / replacePreview: the author explicitly asked for this cover or preview to replace the current one (the
  *  edit page's own replace); without them the main cover and the preview are only filled when missing. */
 /** replaceScreenshots: the author asked for exactly these screenshots, in this order, instead of the current ones. */
-export async function setGameMedia(platform, projectDirectory, gameSlug, { replaceScreenshots, ...input } = {}) {
-  if (replaceScreenshots === undefined) return addGameMedia(platform, projectDirectory, gameSlug, input);
-  if (replaceScreenshots !== true || !input.screenshots?.length) return failure('INVALID_MEDIA', 'replaceScreenshots 只能为 true，并且要给出作者确认过的新截图 screenshots。');
-  const materials = await platform.request(`/api/developer/game-materials/${encodeURIComponent(gameSlug)}`);
-  const before = materials?.media?.screenshots?.items;
-  if (!Array.isArray(before)) return materials?.error ? materials : invalidResponse();
-  const old = before.map(item => item.id).filter(uuid);
-  // Make room first only when the new set would not fit next to the old one.
-  const early = old.length + input.screenshots.length > 20 ? old : [];
-  if (early.length) { const cleared = await editGameMedia(platform, gameSlug, { removeScreenshots: early }); if (cleared.error) return cleared; }
-  const added = await addGameMedia(platform, projectDirectory, gameSlug, input);
-  if (added.error) return { ...added, ...(early.length ? { removedScreenshots: early } : {}) };
-  const fresh = [...added.uploaded, ...added.skipped].filter(item => item.target === 'screenshot' && uuid(item.id)).map(item => item.id);
-  const leftover = old.filter(id => !early.includes(id) && !fresh.includes(id));
-  const order = [...new Set(fresh)];
-  const edited = await editGameMedia(platform, gameSlug, { ...(leftover.length ? { removeScreenshots: leftover } : {}), ...(order.length ? { screenshotOrder: order } : {}) });
-  if (edited.error) return { ...edited, uploaded: added.uploaded, partial: true };
-  return { ...added, removedScreenshots: [...early, ...edited.removedScreenshots], screenshotOrder: edited.screenshotOrder ?? order,
-    message: '已按作者要求换成这组截图。' + added.message };
+export async function setGameMedia(platform, projectDirectory, gameSlug, { replaceScreenshots, replacementId, ...input } = {}) {
+  if (replaceScreenshots === undefined && replacementId === undefined) return addGameMedia(platform, projectDirectory, gameSlug, input);
+  if (replaceScreenshots !== true || !input.screenshots?.length || replacementId !== undefined && !uuid(replacementId)) return failure('INVALID_MEDIA', 'replaceScreenshots 只能为 true，并且要给出作者确认过的新截图 screenshots；重试保留返回的 replacementId。');
+  const invalid = validateMediaInput(gameSlug, input);
+  if (invalid) return invalid;
+  const token = await platform.token?.();
+  if (!token) return failure('AUTH_REQUIRED', '请先连接 AIWANNA 账号。');
+  const unchanged = async () => await currentToken(platform) === token;
+  const captured = new Map(), files = [], skipped = [], seen = new Set();
+  let added = { uploaded: [], skipped: [] }, began = false, completed = false;
+  const id = replacementId?.toLowerCase() ?? randomUUID();
+  const stop = data => ({ code: data.code, error: data.error, ...(Number.isInteger(data.status) ? { status: data.status } : {}), ok: false,
+    partial: completed || added.uploaded.length > 0, uploaded: added.uploaded, skipped: [...added.skipped, ...skipped], replacementId: id,
+    verificationRequired: true, screenshotReplacementPending: began && !completed,
+    message: '新截图只有全部准备好后才会整组生效，不会先清空旧截图。若结果不明，请读取 get_game_materials，并用相同 replacementId、文件和顺序重试；不要自动换批次覆盖其他编辑。' });
+  try {
+    // Capture EVERY selected file before beginning a server batch or changing any
+    // cover/preview. The captured bytes are reused, not read again during upload.
+    const selected = [...(input.cover ? [{ target: 'cover', path: input.cover }] : []), ...input.screenshots.map(path => ({ target: 'screenshot', path })), ...(input.preview ? [{ target: 'preview', path: input.preview }] : [])];
+    for (const item of selected) {
+      const file = await snapshot(projectDirectory, item.target, item.path);
+      captured.set(`${item.target}:${item.path}`, file);
+      if (item.target !== 'screenshot') continue;
+      if (seen.has(file.sha256)) { skipped.push({ target: file.target, path: file.path, reason: 'DUPLICATE_SELECTION' }); continue; }
+      seen.add(file.sha256); files.push(file);
+    }
+    if (!await unchanged()) return stop(accountChanged());
+    if (input.cover || input.preview) {
+      added = await addGameMedia(platform, projectDirectory, gameSlug, { ...input, screenshots: [] }, { token, captured });
+      if (added.error) return stop(added);
+    }
+    const path = `/api/games/${encodeURIComponent(gameSlug)}/screenshots/replace`;
+    const validItem = (item, file) => record(item) && item.key === file.sha256 && uuid(item.id) && typeof item.ready === 'boolean' && typeof item.reused === 'boolean'
+      && mediaSource(item.src, platform, 'screenshot') && item.src !== null
+      && (!item.ready || Number.isSafeInteger(item.width) && item.width > 0 && Number.isSafeInteger(item.height) && item.height > 0);
+    const validBatch = data => record(data) && data.ok === true && data.replacementId === id && typeof data.complete === 'boolean'
+      && Array.isArray(data.items) && data.items.length === files.length && data.items.every((item, index) => validItem(item, files[index]))
+      && new Set(data.items.map(item => item.id)).size === files.length;
+    if (!await unchanged()) return stop(accountChanged());
+    began = true; // Also expose the ID when the begin response itself is lost.
+    let batch = await platform.request(path, { token, body: { action: 'begin', replacementId: id, keys: files.map(file => file.sha256) } });
+    if (batch?.error) return stop(batch);
+    if (!validBatch(batch)) return stop(invalidResponse());
+    if (!batch.complete) {
+      for (const [index, file] of files.entries()) {
+        if (!await unchanged()) return stop(accountChanged());
+        if (batch.items[index].ready) continue;
+        const data = await platform.uploadBytes(`${path}?replacementId=${id}`, file.bytes, { token, type: file.contentType, idempotencyKey: file.sha256 });
+        if (data?.error) return stop(data);
+        if (data?.ok !== true || data.replacementId !== id || !validItem(data.item, file) || !data.item.ready) return stop(invalidResponse());
+      }
+      if (!await unchanged()) return stop(accountChanged());
+      batch = await platform.request(path, { token, body: { action: 'complete', replacementId: id } });
+      if (batch?.error) return stop(batch);
+    }
+    if (!validBatch(batch) || !batch.complete || batch.items.some(item => !item.ready) || !Array.isArray(batch.removedScreenshots) || !batch.removedScreenshots.every(uuid)
+      || !Array.isArray(batch.screenshotOrder) || JSON.stringify(batch.screenshotOrder) !== JSON.stringify(batch.items.map(item => item.id))) return stop(invalidResponse());
+    completed = true;
+    for (const [index, item] of batch.items.entries()) {
+      const value = { target: 'screenshot', path: files[index].path, id: item.id, src: item.src };
+      if (item.reused || batch.replayed) skipped.push({ ...value, reason: 'IDEMPOTENT_REPLAY' });
+      else added.uploaded.push({ ...value, created: true });
+    }
+    if (!await unchanged()) return stop(accountChanged());
+    return { ok: true, partial: false, uploaded: added.uploaded, skipped: [...added.skipped, ...skipped], replacementId: id,
+      removedScreenshots: batch.removedScreenshots, screenshotOrder: batch.screenshotOrder, verificationRequired: true,
+      message: '已整组替换截图；同内容保留原截图 ID。请读取 get_game_materials 并实际查看截图。重试保留 replacementId 和原文件。' };
+  } catch (error) { return stop(failure(began ? 'MEDIA_REPLACEMENT_UNKNOWN' : 'INVALID_MEDIA', error instanceof Error ? error.message : '无法安全读取或验证素材。')); }
 }
 
-async function addGameMedia(platform, projectDirectory, gameSlug, { cover, screenshots = [], preview, fillMissing = true, replaceCover, replacePreview } = {}) {
+function validateMediaInput(gameSlug, { cover, screenshots = [], preview, fillMissing = true, replaceCover, replacePreview } = {}) {
   if (typeof gameSlug !== 'string' || gameSlug.length > 200 || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(gameSlug)
     || fillMissing !== true || !Array.isArray(screenshots) || screenshots.length > 20 || !cover && !preview && !screenshots.length) return failure('INVALID_MEDIA', '请提供真实游戏标识及至少一份素材；截图最多 20 张，主封面和预览只补缺失。');
   if (replaceCover !== undefined && (replaceCover !== true || !cover)) return failure('INVALID_MEDIA', 'replaceCover 只能为 true，并且要同时给出作者确认过的新主封面 cover。');
   if (replacePreview !== undefined && (replacePreview !== true || !preview)) return failure('INVALID_MEDIA', 'replacePreview 只能为 true，并且要同时给出作者确认过的新预览 preview。');
-  const token = await platform.token?.();
+  return null;
+}
+
+async function addGameMedia(platform, projectDirectory, gameSlug, { cover, screenshots = [], preview, fillMissing = true, replaceCover, replacePreview } = {}, prepared) {
+  const invalid = validateMediaInput(gameSlug, { cover, screenshots, preview, fillMissing, replaceCover, replacePreview });
+  if (invalid) return invalid;
+  const token = prepared?.token ?? await platform.token?.();
   if (!token) return failure('AUTH_REQUIRED', '请先连接 AIWANNA 账号。');
   const unchanged = async () => await currentToken(platform) === token;
   const selected = [...(cover ? [{ target: 'cover', path: cover }] : []), ...screenshots.map(path => ({ target: 'screenshot', path })), ...(preview ? [{ target: 'preview', path: preview }] : [])].map((item, index) => ({ ...item, index }));
@@ -140,7 +195,7 @@ async function addGameMedia(platform, projectDirectory, gameSlug, { cover, scree
     // Every selected file is safely captured, MIME checked and decoded/normalized before any write.
     for (const item of selected) {
       active = item;
-      const file = { ...await snapshot(projectDirectory, item.target, item.path), index: item.index }, key = `${file.target}:${file.sha256}`;
+      const file = { ...(prepared?.captured.get(`${item.target}:${item.path}`) ?? await snapshot(projectDirectory, item.target, item.path)), index: item.index }, key = `${file.target}:${file.sha256}`;
       item.path = file.path;
       if (seen.has(key)) { skipped.push({ target: file.target, path: file.path, reason: 'DUPLICATE_SELECTION' }); completed.add(file.index); continue; }
       seen.add(key); files.push(file);
@@ -166,7 +221,7 @@ async function addGameMedia(platform, projectDirectory, gameSlug, { cover, scree
 
 /** The edit page's other media changes, only on the author's explicit request: delete screenshots (by the ids
  *  get_game_materials returns), put screenshots in a new order (the given ids first, the rest keep their order), and
- *  take the preview down. Replacing a screenshot is set_game_media (new picture), then this (remove the old, order). */
+ *  take the preview down. To replace the complete screenshot set atomically, use set_game_media with replaceScreenshots. */
 export async function editGameMedia(platform, gameSlug, { removeScreenshots = [], screenshotOrder, removePreview } = {}) {
   if (typeof gameSlug !== 'string' || gameSlug.length > 200 || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(gameSlug)) return failure('INVALID_GAME_SLUG', '请提供有效的游戏标识。');
   const ids = list => Array.isArray(list) && list.length <= 20 && list.every(uuid) && new Set(list).size === list.length;

@@ -19,7 +19,7 @@
 ```toml
 [mcp_servers.onegp]
 command = "npx"
-args = ["--yes", "github:1gp-studio/publisher-mcp#v0.17.0"]
+args = ["--yes", "github:1gp-studio/publisher-mcp#v0.17.1"]
 startup_timeout_sec = 60
 tool_timeout_sec = 600
 ```
@@ -33,7 +33,7 @@ tool_timeout_sec = 600
 在终端运行一次（`--scope user` 对你本人的所有项目生效）：
 
 ```sh
-claude mcp add onegp --scope user -- npx --yes github:1gp-studio/publisher-mcp#v0.17.0
+claude mcp add onegp --scope user -- npx --yes github:1gp-studio/publisher-mcp#v0.17.1
 ```
 
 已经装过时，用 `claude mcp list` 确认当前生效的配置，只更新其中固定的包版本；保留既有参数和环境配置，不删除 AIWANNA 的授权凭证。上面的命令用于首次安装，不需要每次发布都重新添加。
@@ -242,6 +242,12 @@ MCP **负责检查、上传和保存，不生成图片**；截图和宣传视频
 平台目前限制全站同时 2 个构建、每个账号最多 50 个作品，不设每日次数限制。账号邮箱验证由 Supabase 负责；平台管理员必须配置生产邮件服务，才能支持组织外用户收取登录邮件。AIWANNA 托管团队的 Vercel 套餐及运行限制仍适用；不占用用户个人 Vercel 账号。GitHub 来源继续遵守仓库授权与构建限制。
 
 开发时可使用 `ONEGP_PLATFORM_URL` 指向另一 HTTPS 平台，或本机 HTTP localhost/127.0.0.1；凭证按平台分别保存。测试运行 `npm test`，包括真实 MCP stdio 客户端集成测试。
+
+## v0.17.1：截图替换与本地录制修复
+
+- `replaceScreenshots:true` 先验证并暂存整组图片，再一次替换；已有 20 张截图也能换，坏文件或上传失败不先清空旧图，同内容复用原截图 ID。结果不明时，读取当前物料并用返回的 `replacementId`、相同文件和顺序重试；遇到其他编辑引起的冲突时停止，不自动覆盖。
+- 本地录制只提供游戏运行资源，拒绝隐藏文件、凭据、后端配置及越界链接；视频和截图输出再次检查目录与链接，防止写到项目外。
+- 需先执行平台迁移 `202610290004_atomic_screenshot_replace.sql` 并部署配套接口，再发布此标签。已有授权和工具保持兼容，0.16+ 启动器会随平台推荐版本更新。
 
 ## v0.17.0：参加专题
 
