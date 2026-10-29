@@ -177,7 +177,20 @@ export async function gameTextStatus(platform,gameSlug,{use='keys'}={}){
   if(!data||typeof data!=='object'||!Array.isArray(data.status)||data.status.some(item=>!item||typeof item!=='object'||!supportedGameLanguages.includes(item.locale)||typeof item.state!=='string'))return {error:'平台返回异常状态，请稍后查询。',code:'PLATFORM_ERROR'};
   return {platformTranslation:data.engine??null,status:(data.status??[]).map(item=>({locale:item.locale,state:item.state,total:item.total,done:item.done,missing:item.missing,stale:item.stale,editedByCreator:item.edited}))};
 }
-export async function setGameDetails(platform,gameSlug,{titles,descriptions,languages,maker,genre,tags}){
+// 专题 (topic): join or leave one, e.g. when the publish prompt says 参加专题「…」（halloween-2026）.
+// Applies at once; a game an administrator moved out of the topic cannot rejoin by itself.
+export async function setGameTopic(platform,gameSlug,{slug,joined=true}){
+  const result=await platform.request(`/api/games/${encodeURIComponent(gameSlug)}/topics`,{method:'POST',body:{topic:slug,joined}});
+  return result?.error?{saved:false,error:result.error,...(result.code?{code:result.code}:{})}:{saved:true,topic:slug,state:result?.state??null};
+}
+
+export async function setGameDetails(platform,gameSlug,{titles,descriptions,languages,maker,genre,tags,topic}){
+  if(topic){
+    const rest=titles||descriptions||languages||maker||genre!==undefined||tags!==undefined;
+    const details=rest?await setGameDetails(platform,gameSlug,{titles,descriptions,languages,maker,genre,tags}):null;
+    if(details?.error&&!details.ok)return {...details,topic:{saved:false,error:'其他信息没保存上，专题没有改。'}};
+    return {...(details??{ok:true}),topic:await setGameTopic(platform,gameSlug,topic)};
+  }
   const texts=()=>platform.request(`/api/developer/language-files/${encodeURIComponent(gameSlug)}`,{method:'PATCH',body:{...(titles?{titles}:{}),...(descriptions?{descriptions}:{}),...(languages?{languages}:{})}});
   const relabel=genre!==undefined||tags!==undefined;
   if(!maker&&!relabel)return texts();

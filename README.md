@@ -19,7 +19,7 @@
 ```toml
 [mcp_servers.onegp]
 command = "npx"
-args = ["--yes", "github:1gp-studio/publisher-mcp#v0.16.0"]
+args = ["--yes", "github:1gp-studio/publisher-mcp#v0.17.0"]
 startup_timeout_sec = 60
 tool_timeout_sec = 600
 ```
@@ -33,7 +33,7 @@ tool_timeout_sec = 600
 在终端运行一次（`--scope user` 对你本人的所有项目生效）：
 
 ```sh
-claude mcp add onegp --scope user -- npx --yes github:1gp-studio/publisher-mcp#v0.16.0
+claude mcp add onegp --scope user -- npx --yes github:1gp-studio/publisher-mcp#v0.17.0
 ```
 
 已经装过时，用 `claude mcp list` 确认当前生效的配置，只更新其中固定的包版本；保留既有参数和环境配置，不删除 AIWANNA 的授权凭证。上面的命令用于首次安装，不需要每次发布都重新添加。
@@ -242,6 +242,11 @@ MCP **负责检查、上传和保存，不生成图片**；截图和宣传视频
 平台目前限制全站同时 2 个构建、每个账号最多 50 个作品，不设每日次数限制。账号邮箱验证由 Supabase 负责；平台管理员必须配置生产邮件服务，才能支持组织外用户收取登录邮件。AIWANNA 托管团队的 Vercel 套餐及运行限制仍适用；不占用用户个人 Vercel 账号。GitHub 来源继续遵守仓库授权与构建限制。
 
 开发时可使用 `ONEGP_PLATFORM_URL` 指向另一 HTTPS 平台，或本机 HTTP localhost/127.0.0.1；凭证按平台分别保存。测试运行 `npm test`，包括真实 MCP stdio 客户端集成测试。
+
+## v0.17.0：参加专题
+
+- `set_game_details` 多一个可选参数 `topic`：`{ slug: "halloween-2026" }` 让已发布的游戏参加进行中的专题（如「万圣夜恐怖小游戏」），`joined: false` 退出。马上生效，不用重新发布；被管理员移出专题的游戏不能自己再加入。网页发布提示词里写了「参加专题「…」（slug）」时用它。
+- 没有新工具，已装 0.16.0 的会自动换上；Codex 也不用新开任务。
 
 ## v0.16.0：自动更新
 
