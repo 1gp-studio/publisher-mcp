@@ -19,7 +19,7 @@
 ```toml
 [mcp_servers.onegp]
 command = "npx"
-args = ["--yes", "github:1gp-studio/publisher-mcp#v0.17.4"]
+args = ["--yes", "github:1gp-studio/publisher-mcp#v0.17.5"]
 startup_timeout_sec = 60
 tool_timeout_sec = 600
 ```
@@ -33,7 +33,7 @@ tool_timeout_sec = 600
 在终端运行一次（`--scope user` 对你本人的所有项目生效）：
 
 ```sh
-claude mcp add onegp --scope user -- npx --yes github:1gp-studio/publisher-mcp#v0.17.4
+claude mcp add onegp --scope user -- npx --yes github:1gp-studio/publisher-mcp#v0.17.5
 ```
 
 已经装过时，用 `claude mcp list` 确认当前生效的配置，只更新其中固定的包版本；保留既有参数和环境配置，不删除 AIWANNA 的授权凭证。上面的命令用于首次安装，不需要每次发布都重新添加。
@@ -243,7 +243,7 @@ MCP **负责检查、上传和保存，不生成图片**；截图和宣传视频
 
 开发时可使用 `ONEGP_PLATFORM_URL` 指向另一 HTTPS 平台，或本机 HTTP localhost/127.0.0.1；凭证按平台分别保存。测试运行 `npm test`，包括真实 MCP stdio 客户端集成测试。
 
-## v0.17.4：安装变轻
+## v0.17.5：安装变轻
 
 - 首次安装不再下载依赖树：服务打包在 `dist/` 里，连接快很多。
 - `sharp`（处理图片）和 `esbuild`（打包 Vercel 函数）第一次用到时才下载，放在 `~/.config/1gp-studio/mcp-deps/`，版本固定，下载一次以后不再下载。需要网络；下载失败会提示重试。

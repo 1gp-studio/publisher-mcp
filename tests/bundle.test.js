@@ -12,9 +12,9 @@ import { loadDependency } from '../src/lazy-deps.js';
 const root = fileURLToPath(new URL('..', import.meta.url));
 const lines = text => text.replace(/\r\n/g, '\n');
 
-test('dist/ matches the source: run npm run build after changing src/ or the version', { timeout: 60000 }, async () => {
-  assert.equal(lines(await readFile(join(root, 'dist', 'server.js'), 'utf8')) === lines(await bundle()), true, 'dist/server.js is stale: npm run build');
-  assert.equal(lines(await readFile(join(root, 'dist', 'recorder-page.js'), 'utf8')), lines(await pageSource()), 'dist/recorder-page.js is stale: npm run build');
+test('dist/ matches the source: run npm run bundle after changing src/ or the version', { timeout: 60000 }, async () => {
+  assert.equal(lines(await readFile(join(root, 'dist', 'server.js'), 'utf8')) === lines(await bundle()), true, 'dist/server.js is stale: npm run bundle');
+  assert.equal(lines(await readFile(join(root, 'dist', 'recorder-page.js'), 'utf8')), lines(await pageSource()), 'dist/recorder-page.js is stale: npm run bundle');
 });
 
 test('a first install carries no dependency tree', async () => {
@@ -23,6 +23,8 @@ test('a first install carries no dependency tree', async () => {
   assert.deepEqual(Object.keys(info.lazyDependencies).sort(), ['esbuild', 'sharp']);
   for (const [name, version] of Object.entries(info.lazyDependencies)) assert.equal(info.devDependencies[name], version, `${name} is tested at the version fetched later`);
   assert.ok(info.files.includes('dist'));
+  // npm installs every development dependency of a github: package that has one of these scripts, which undoes all of this.
+  for (const script of ['preinstall', 'install', 'postinstall', 'build', 'prepack', 'prepare']) assert.equal(info.scripts[script], undefined, `no "${script}" script`);
 });
 
 test('without any node_modules the installed package still starts, from the bundle, with every tool', { timeout: 60000 }, async t => {

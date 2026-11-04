@@ -1,4 +1,4 @@
-// npm run build: bundles the server into dist/, so an install needs no dependency tree and connects quickly.
+// npm run bundle: bundles the server into dist/, so an install needs no dependency tree and connects quickly.
 // mp4-muxer and webm-muxer stay real (small) dependencies because the recorder hands their files to the browser;
 // sharp and esbuild are fetched on first use (src/lazy-deps.js). tests/bundle.test.js fails when dist/ is stale.
 import { build } from 'esbuild';
