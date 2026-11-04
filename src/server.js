@@ -37,7 +37,7 @@ const platform=new Platform();
 const server=new McpServer({name:'1gp-publisher',version:packageInfo.version});
 const promptResult = text => ({ messages: [{ role: 'user', content: { type: 'text', text } }] });
 for (const [name, description, text] of [
-  ['choose_publish_path', 'Inspect the local project and choose a suitable AIWANNA-managed publishing channel.', automaticPublishPrompt],
+  ['choose_publish_path', 'Inspect the local project, recommend a suitable AIWANNA-managed publishing channel and wait for the author to choose before publishing.', automaticPublishPrompt],
   ['publish_local_artifacts', 'Keep the local API upload channel; prepare or reuse complete artifacts and upload through AIWANNA.', localPublishPrompt],
   ['prepare_docker_publish', 'Prepare and publish to the AIWANNA-operated EC2 Docker environment, respecting its limits.', dockerPublishPrompt],
   ['make_game_multilingual', 'Make the game\'s own text follow the player\'s language while preserving its existing keys/phrases mode and reviewed display integration. Reuse automatic text sources, review candidates, then upload complete translations from your own AI.', multilingualPrompt],

@@ -19,7 +19,7 @@
 ```toml
 [mcp_servers.onegp]
 command = "npx"
-args = ["--yes", "github:1gp-studio/publisher-mcp#v0.17.2"]
+args = ["--yes", "github:1gp-studio/publisher-mcp#v0.17.3"]
 startup_timeout_sec = 60
 tool_timeout_sec = 600
 ```
@@ -33,7 +33,7 @@ tool_timeout_sec = 600
 在终端运行一次（`--scope user` 对你本人的所有项目生效）：
 
 ```sh
-claude mcp add onegp --scope user -- npx --yes github:1gp-studio/publisher-mcp#v0.17.2
+claude mcp add onegp --scope user -- npx --yes github:1gp-studio/publisher-mcp#v0.17.3
 ```
 
 已经装过时，用 `claude mcp list` 确认当前生效的配置，只更新其中固定的包版本；保留既有参数和环境配置，不删除 AIWANNA 的授权凭证。上面的命令用于首次安装，不需要每次发布都重新添加。
@@ -242,6 +242,10 @@ MCP **负责检查、上传和保存，不生成图片**；截图和宣传视频
 平台目前限制全站同时 2 个构建、每个账号最多 50 个作品，不设每日次数限制。账号邮箱验证由 Supabase 负责；平台管理员必须配置生产邮件服务，才能支持组织外用户收取登录邮件。AIWANNA 托管团队的 Vercel 套餐及运行限制仍适用；不占用用户个人 Vercel 账号。GitHub 来源继续遵守仓库授权与构建限制。
 
 开发时可使用 `ONEGP_PLATFORM_URL` 指向另一 HTTPS 平台，或本机 HTTP localhost/127.0.0.1；凭证按平台分别保存。测试运行 `npm test`，包括真实 MCP stdio 客户端集成测试。
+
+## v0.17.3：自动模式先确认发布方式
+
+`choose_publish_path` 先检查项目，说明推荐方式、理由与可行备选，再询问作者并等待明确的渠道选择后才上传、推送或部署。新游戏仍优先推荐本地制品；已有游戏推荐沿用原渠道。一般发布授权不代表已选渠道，已有明确渠道选择则不重复询问。后续本地构建和 API 上传步骤仅适用于选定本地渠道的情况；手动指定渠道和普通更新流程保持原行为。
 
 ## v0.17.2：搬运
 
@@ -492,7 +496,7 @@ MCP 自动移除自己创建的临时镜像标签，保留私有临时目录中�
 
 网页先区分“让 AI 帮我发布”和“自己选择发布方式”。MCP 同时提供：
 
-- `choose_publish_path`：检查实际运行需求并推荐渠道，优先本地构建和 API 上传必要产物。
+- `choose_publish_path`：检查实际运行需求并推荐渠道，优先本地构建和 API 上传必要产物；必须询问并等待作者明确选择渠道，已有明确选择不重复问。
 - `publish_local_artifacts`：固定本地 API 上传；已有产物先验证复用，没有则补齐构建，不要求网页手动上传。
 - `prepare_github_publish`：传入 `repo`，可选 `kind`、`ref`、`check_result`，根据检查结果准备指定仓库。保持 GitHub 渠道，不静默改为本地上传或 Docker；完成后回原表单重新检查。
 - `prepare_docker_publish`：固定 AIWANNA 团队运营的 Docker/EC2，检查权限和运行限制，通过现有镜像上传及发布工具完成。
