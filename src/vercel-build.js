@@ -1,4 +1,4 @@
-import { build } from 'esbuild';
+import { loadDependency } from './lazy-deps.js';
 import { lstat,readdir,readFile,writeFile,mkdir,mkdtemp,rename,rm,realpath,open } from 'node:fs/promises';
 import { join,dirname,isAbsolute } from 'node:path';
 import { builtinModules } from 'node:module';
@@ -108,6 +108,7 @@ async function copyFrontend(source,destination) {
 }
 
 async function bundleFunction(root,entry,directory,settings) {
+  const {build}=await loadDependency('esbuild');
   await mkdir(directory,{recursive:true});
   let result;
   try {

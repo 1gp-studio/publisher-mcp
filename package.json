@@ -1,6 +1,6 @@
 {
   "name": "@1gp-studio/publisher-mcp",
-  "version": "0.17.3",
+  "version": "0.17.4",
   "description": "Publish web games to 1GP Studio from MCP clients such as Codex and Claude Code",
   "type": "module",
   "bin": {
@@ -8,6 +8,7 @@
   },
   "files": [
     "src",
+    "dist",
     "README.md",
     "LICENSE"
   ],
@@ -15,20 +16,25 @@
     "node": ">=24"
   },
   "scripts": {
+    "build": "node scripts/build.mjs",
     "test": "node --test tests/*.test.js"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "1.32.1",
-    "esbuild": "0.28.2",
-    "file-type": "22.1.1",
     "mp4-muxer": "5.2.2",
-    "sharp": "0.35.5",
-    "webm-muxer": "5.1.4",
-    "zod": "^4.3.6"
+    "webm-muxer": "5.1.4"
   },
   "license": "MIT",
   "devDependencies": {
+    "@modelcontextprotocol/sdk": "1.32.1",
+    "esbuild": "0.28.2",
+    "file-type": "22.1.1",
+    "sharp": "0.35.5",
     "vite": "8.3.4",
-    "ws": "8.22.0"
+    "ws": "8.22.0",
+    "zod": "^4.3.6"
+  },
+  "lazyDependencies": {
+    "esbuild": "0.28.2",
+    "sharp": "0.35.5"
   }
 }

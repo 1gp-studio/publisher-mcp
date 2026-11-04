@@ -16,6 +16,12 @@
 3. **实在要加新工具**（和已有工具都不沾边）：在 README 的版本说明里写一句「Codex 要新开任务才看得到」。
 4. 工具说明（description）也会被缓存。改了行为，要让旧说明下的调用仍然得到合理结果，或者在返回结果里告诉 AI 怎么做。
 
+## 改了代码要重新打包
+
+作者装到的是 `dist/` 里的打包版，不是 `src/`。改了 `src/` 或版本号后运行 `npm run build`，把 `dist/` 一起提交；忘了的话 `tests/bundle.test.js` 会失败。
+
+新依赖默认放进 `devDependencies`，由打包带上。带原生程序的大依赖（像 `sharp`、`esbuild`）放进 `lazyDependencies`，代码里用 `loadDependency` 取，不要写在 `dependencies` 里，否则首次安装又会变慢。
+
 ## 发版
 
 1. 本仓库测试通过（`npm test`），`package.json`、`package-lock.json` 和网站提示词的版本一致（网站仓库的 `tests/mcp-version-pins.test.ts` 会查）。

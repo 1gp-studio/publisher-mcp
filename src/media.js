@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { fileTypeFromBuffer } from 'file-type';
-import sharp from 'sharp';
+import { loadDependency } from './lazy-deps.js';
 import { readProjectFile } from './media-files.js';
 import { isPlatformOrigin } from './platform-origins.js';
 
@@ -21,6 +21,7 @@ export async function snapshot(projectDirectory, target, path) {
   if (!type || !(target === 'preview' ? Object.hasOwn(previewTypes, type.mime) : imageTypes.has(type.mime))) throw new Error(`${path} 的实际文件类型不支持；封面/截图需 JPG、PNG、WebP，预览需 GIF、WebP、MP4、WebM。`);
   let bytes = file.bytes, contentType = type.mime;
   if (type.mime.startsWith('image/')) {
+    const { default: sharp } = await loadDependency('sharp');
     const input = sharp(bytes, { limitInputPixels: maxPixels, animated: false, failOn: 'error' });
     const metadata = await input.metadata();
     const height = metadata.pageHeight || metadata.height;
