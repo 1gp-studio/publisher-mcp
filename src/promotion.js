@@ -65,9 +65,9 @@ function platformItem(key, materials) {
   if (key === 'maker') {
     const maker = materials.maker;
     if (!record(maker)) return null;
-    // 制作信息 counts as there once the AI tools, the screen and the session length are set; notes are optional.
-    const done = Array.isArray(maker.tools) && maker.tools.length > 0 && typeof maker.orientation === 'string' && typeof maker.session === 'string';
-    return { missing: !done, value: { tools: maker.tools ?? [], orientation: maker.orientation ?? null, session: maker.session ?? null }, source: 'creator' };
+    // 制作信息 counts as there once the AI tools (or, for a 搬运 game, its original), the screen and the session length are set; notes are optional.
+    const done = (Array.isArray(maker.tools) && maker.tools.length > 0 || record(maker.port)) && typeof maker.orientation === 'string' && typeof maker.session === 'string';
+    return { missing: !done, value: { tools: maker.tools ?? [], orientation: maker.orientation ?? null, session: maker.session ?? null, ...(record(maker.port) ? { port: maker.port } : {}) }, source: 'creator' };
   }
   if (key === 'genre') {
     if (!record(labels) || !Object.hasOwn(labels, 'genre') || labels.genre !== null && !genres.includes(labels.genre)) return null;
@@ -101,7 +101,7 @@ const required = ['genre', 'tags', 'mainCover', 'maker', 'screenshots'];
 const nextSteps = {
   genre: '根据代码、规则和实玩证据选择一个最主要的玩法分类，不凭项目名或框架猜分类；分类规则见 classification。',
   tags: '根据主角、画风、核心玩法和操作方式拟定主语言标签，最多 5 个、每个不超过 12 字。不确定的术语先核实，不能只凭升级系统就认定 Roguelike；与分类的关系见 classification。',
-  maker: '根据代码和制作过程填制作信息：用了哪些 AI 工具、适合的屏幕（portrait/landscape/desktop）、一局多久；制作笔记可选，用作者的口吻写，先给作者看。用 set_game_details 的 maker。',
+  maker: '根据代码和制作过程填制作信息：用了哪些 AI 工具（搬运别人的开源游戏时改填 port：原作名、原作者、原项目链接、开源协议）、适合的屏幕（portrait/landscape/desktop）、一局多久；制作笔记可选，用作者的口吻写，先给作者看。用 set_game_details 的 maker。',
   mainCover: '优先复用已有封面或项目授权美术；缺少时由宿主工具制作清楚可读的 16:9 主封面，建议 1600×900。多语言自动叠字另复用一张无字底图，不需要各语言截图。',
   screenshots: '首发需要至少 3 张真实截图。优先复用已有截图；缺少时用脚本或 record_game_video（REC.shot）截 3–5 个不同的实机状态（保持原比例），只抽看一两张确认。不得用生成图冒充游戏截图。',
   preview: '可选，首发后问作者要不要做一段宣传视频，作者要再做：用 record_game_video 录制，目标是让玩家一眼就想玩；直接出正片 MP4，不超过 5 MB；只拍游戏里真实会发生的东西，不碰玩家存档。',

@@ -77,7 +77,7 @@ test('live materials dynamically remove missing items and preserve curated scree
   const before = await preparePromotion(f.root, existing(materials));
   assert.deepEqual(before.missing, keys);
   materials.labels = { genre: 'action', genreSource: 'curated', tags: ['像素风'] };
-  materials.maker = { tools: ['Claude Code'], orientation: 'portrait', session: 'short', allowRemix: false, notes: '' };
+  materials.maker = { tools: [], orientation: 'portrait', session: 'short', allowRemix: false, notes: '', port: { title: 'Freeciv', author: 'Freeciv Team', url: 'https://github.com/freeciv/freeciv', license: 'GPL-2.0' } };
   materials.media.mainCover = { src: 'https://platform.example/game-covers/test.webp', source: 'curated', missing: false };
   materials.media.screenshots = { items: [], count: 0, fallback: [{ src: 'https://platform.example/shots/01.webp', width: 800, height: 600 }], missing: false };
   materials.media.preview = { src: 'https://platform.example/game-previews/test.gif', kind: 'image', disabled: false, missing: false };
