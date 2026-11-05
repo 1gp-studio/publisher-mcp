@@ -20,9 +20,9 @@
 
 作者装到的是 `dist/` 里的打包版，不是 `src/`。改了 `src/` 或版本号后运行 `npm run bundle`，把 `dist/` 一起提交；忘了的话 `tests/bundle.test.js` 会失败。
 
-`package.json` 里不要加名叫 `build`、`prepare`、`prepack`、`install`、`preinstall`、`postinstall` 的脚本：有这些脚本时，npm 从 GitHub 安装会把全部开发依赖都装一遍，安装又会变慢。
+`package.json` 里不要加名叫 `build`、`prepare`、`prepack`、`install`、`preinstall`、`postinstall` 的脚本：有这些脚本时，npm 从 GitHub 安装会把全部开发依赖都装一遍，安装又会变慢。安装命令也一直用下载链接（`https://codeload.github.com/1gp-studio/publisher-mcp/tar.gz/refs/tags/vX.Y.Z`），`npx github:` 这种写法本身就要约 20 秒。
 
-新依赖默认放进 `devDependencies`，由打包带上。带原生程序的大依赖（像 `sharp`、`esbuild`）放进 `lazyDependencies`，代码里用 `loadDependency` 取，不要写在 `dependencies` 里，否则首次安装又会变慢。
+新依赖默认放进 `devDependencies`，由打包带上。带原生程序的大依赖（像 `sharp`、`esbuild`）放进 `lazyDependencies`，代码里用 `loadDependency` 取，不要写在 `dependencies` 里，否则首次安装又会变慢。安装命令也一直用下载链接（`https://codeload.github.com/1gp-studio/publisher-mcp/tar.gz/refs/tags/vX.Y.Z`），`npx github:` 这种写法本身就要约 20 秒。
 
 ## 发版
 
