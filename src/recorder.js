@@ -222,3 +222,60 @@ async function recordOnce({ served, pageFile, prepared, script, runtime, width, 
   if (take.error) return failure('RECORDING_FAILED', take.error);
   return { ...take, shots: [...shots] };
 }
+
+// set_game_media: an animated GIF / WebP preview is turned into MP4 before upload. Game pages play previews in
+// <video> (hardware decoded, paused off screen); an animated picture would be decoded on the CPU for as long as it
+// is on the page. The same headless recorder replays the picture's own frames with their own timing, so nothing
+// else needs installing. Returns null when there is no browser or the browser can't do it: the original is sent.
+const previewEdge = 1280;
+export const animatedPreviewBox = (width, height) => {
+  const scale = Math.min(1, previewEdge / Math.max(width, height)), even = side => Math.max(2, Math.round(side * scale / 2) * 2);
+  return [even(width), even(height)];
+};
+const animatedDirector = (source, type) => `(async () => {
+  const decoder = new ImageDecoder({ data: await (await fetch('/${source}')).arrayBuffer(), type: '${type}' });
+  await decoder.tracks.ready; await decoder.completed;
+  const count = decoder.tracks.selectedTrack.frameCount, starts = [];
+  let total = 0;
+  for (let i = 0; i < count; i++) {
+    const { image } = await decoder.decode({ frameIndex: i });
+    starts.push(total);
+    total += image.duration >= 20000 ? image.duration : 100000;   // like browsers: a frame under 20 ms shows for 100 ms
+    image.close();
+  }
+  const canvas = document.querySelector('canvas'), context = canvas.getContext('2d');
+  canvas.width = REC.width; canvas.height = REC.height;
+  let shown = -1;
+  REC.log('frames ' + count + ', ' + Math.round(total / 1000) + ' ms');
+  await REC.run({ fps: 30, seconds: Math.max(0.5, total / 1e6), canvas, async step(i, t) {
+    let k = shown < 0 ? 0 : shown;
+    while (k + 1 < count && starts[k + 1] <= t * 1e6) k++;
+    if (k === shown) return;
+    const { image } = await decoder.decode({ frameIndex: k });
+    context.fillStyle = '#000'; context.fillRect(0, 0, canvas.width, canvas.height);   // video has no transparency
+    context.drawImage(image, 0, 0, canvas.width, canvas.height);
+    image.close(); shown = k;
+  } });
+})();`;
+
+export async function animatedPreviewVideo({ bytes, type, width, height, browser = findBrowser(), launch = spawn, timeoutSeconds = 300 } = {}) {
+  if (!browser || !['image/gif', 'image/webp'].includes(type) || !(width > 0 && height > 0)) return null;
+  const served = await mkdtemp(join(tmpdir(), 'aiwanna-preview-'));
+  try {
+    const source = type === 'image/gif' ? 'source.gif' : 'source.webp';
+    const html = '<!doctype html><html><head><meta charset="utf-8"></head><body style="margin:0;background:#000"><canvas></canvas></body></html>';
+    await writeFile(join(served, source), bytes);
+    await writeFile(join(served, 'index.html'), html);
+    const [runtime, mp4, webm] = await Promise.all([readFile(join(here, 'recorder-page.js'), 'utf8'), readFile(require.resolve('mp4-muxer'), 'utf8'), readFile(require.resolve('webm-muxer'), 'utf8')]);
+    const [boxWidth, boxHeight] = animatedPreviewBox(width, height);
+    const log = [];
+    for (let attempt = 1, scale = 1; attempt <= 3; attempt++) {
+      const take = await recordOnce({ served, pageFile: join(served, 'index.html'), prepared: recordingPage(html), script: animatedDirector(source, type),
+        runtime: `${mp4}\n${webm}\n${runtime}`, width: boxWidth, height: boxHeight, scale, arg: '', timeoutSeconds, browser, launch, log });
+      if (take.error) return null;
+      if (take.video.length <= maxVideoBytes) return { bytes: take.video, contentType: take.container === 'webm' ? 'video/webm' : 'video/mp4', frames: take.frames, size: take.size };
+      scale *= 0.85 * maxVideoBytes / take.video.length;
+    }
+    return null;
+  } catch { return null; } finally { await rm(served, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }).catch(() => {}); }
+}

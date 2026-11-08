@@ -3,6 +3,7 @@ import { fileTypeFromBuffer } from 'file-type';
 import { loadDependency } from './lazy-deps.js';
 import { readProjectFile } from './media-files.js';
 import { isPlatformOrigin } from './platform-origins.js';
+import { animatedPreviewVideo } from './recorder.js';
 
 const maxSource = 20 * 1024 * 1024, maxImage = 2 * 1024 * 1024, maxPixels = 25000000;
 const imageTypes = new Set(['image/png', 'image/jpeg', 'image/webp']);
@@ -15,11 +16,11 @@ const failure = (code, error) => ({ code, error });
 const invalidResponse = () => failure('PLATFORM_ERROR', '平台未返回完整媒体保存结果；请检查物料后用相同文件恢复，不要另换文件重复添加。');
 const accountChanged = () => failure('ACCOUNT_CHANGED', '连接账号已变更；已完成素材留在原账号下，请回到正确账号继续。');
 
-export async function snapshot(projectDirectory, target, path) {
+export async function snapshot(projectDirectory, target, path, convertAnimated = animatedPreviewVideo) {
   const file = await readProjectFile(projectDirectory, path, maxSource);
   const type = await fileTypeFromBuffer(file.bytes).catch(() => undefined);
   if (!type || !(target === 'preview' ? Object.hasOwn(previewTypes, type.mime) : imageTypes.has(type.mime))) throw new Error(`${path} 的实际文件类型不支持；封面/截图需 JPG、PNG、WebP，预览需 GIF、WebP、MP4、WebM。`);
-  let bytes = file.bytes, contentType = type.mime;
+  let bytes = file.bytes, contentType = type.mime, converted;
   if (type.mime.startsWith('image/')) {
     const { default: sharp } = await loadDependency('sharp');
     const input = sharp(bytes, { limitInputPixels: maxPixels, animated: false, failOn: 'error' });
@@ -29,6 +30,12 @@ export async function snapshot(projectDirectory, target, path) {
     if (target === 'preview') {
       // Decode the first displayed frame without rewriting animation or losing timing/audio.
       await input.resize(1, 1).raw().toBuffer();
+      // An animated picture goes up as MP4 (recorder.js animatedPreviewVideo): pages play previews in <video>.
+      // Without a local Chrome / Edge the picture itself is sent, as before.
+      if ((metadata.pages ?? 1) > 1) {
+        const video = await convertAnimated({ bytes, type: type.mime, width: metadata.width, height });
+        if (video) { bytes = video.bytes; contentType = video.contentType; converted = `${type.ext}→${video.contentType === 'video/webm' ? 'webm' : 'mp4'}`; }
+      }
     } else {
       // Same shape limits as the platform, so large source captures need no manual compression.
       for (const quality of [85, 75, 65]) {
@@ -39,7 +46,7 @@ export async function snapshot(projectDirectory, target, path) {
       contentType = 'image/webp';
     }
   }
-  return { target, path: file.relativePath, bytes, contentType, sha256: fingerprint(bytes) };
+  return { target, path: file.relativePath, bytes, contentType, sha256: fingerprint(bytes), ...(converted ? { converted } : {}) };
 }
 
 function mediaSource(src, platform, target) {
@@ -209,7 +216,7 @@ async function addGameMedia(platform, projectDirectory, gameSlug, { cover, scree
         : await platform.uploadBytes(path, file.bytes, { token, type: file.contentType, idempotencyKey: file.sha256 });
       const data = file.target === 'preview' ? raw : savedResult(raw, platform, file.target);
       if (data?.error) return stop(data);
-      const item = { target: file.target, path: file.path, src: data.src, ...(data.id ? { id: data.id } : {}), ...(data.reason ? { reason: data.reason } : {}) };
+      const item = { target: file.target, path: file.path, src: data.src, ...(data.id ? { id: data.id } : {}), ...(data.reason ? { reason: data.reason } : {}), ...(file.converted ? { converted: file.converted } : {}) };
       if (data.skipped) skipped.push(item); else uploaded.push({ ...item, created: data.created });
       completed.add(file.index);
       if (!await unchanged()) return stop(accountChanged());
