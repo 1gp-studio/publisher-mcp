@@ -19,7 +19,7 @@
 ```toml
 [mcp_servers.onegp]
 command = "npx"
-args = ["--yes", "https://codeload.github.com/1gp-studio/publisher-mcp/tar.gz/refs/tags/v0.17.8"]
+args = ["--yes", "https://codeload.github.com/1gp-studio/publisher-mcp/tar.gz/refs/tags/v0.17.9"]
 startup_timeout_sec = 60
 tool_timeout_sec = 600
 ```
@@ -33,7 +33,7 @@ tool_timeout_sec = 600
 在终端运行一次（`--scope user` 对你本人的所有项目生效）：
 
 ```sh
-claude mcp add onegp --scope user -- npx --yes https://codeload.github.com/1gp-studio/publisher-mcp/tar.gz/refs/tags/v0.17.8
+claude mcp add onegp --scope user -- npx --yes https://codeload.github.com/1gp-studio/publisher-mcp/tar.gz/refs/tags/v0.17.9
 ```
 
 已经装过时，用 `claude mcp list` 确认当前生效的配置，只更新其中固定的包版本；保留既有参数和环境配置，不删除 AIWANNA 的授权凭证。上面的命令用于首次安装，不需要每次发布都重新添加。
@@ -242,6 +242,13 @@ MCP **负责检查、上传和保存，不生成图片**；截图和宣传视频
 平台目前限制全站同时 2 个构建、每个账号最多 50 个作品，不设每日次数限制。账号邮箱验证由 Supabase 负责；平台管理员必须配置生产邮件服务，才能支持组织外用户收取登录邮件。AIWANNA 托管团队的 Vercel 套餐及运行限制仍适用；不占用用户个人 Vercel 账号。GitHub 来源继续遵守仓库授权与构建限制。
 
 开发时可使用 `ONEGP_PLATFORM_URL` 指向另一 HTTPS 平台，或本机 HTTP localhost/127.0.0.1；凭证按平台分别保存。测试运行 `npm test`，包括真实 MCP stdio 客户端集成测试。
+
+## v0.17.9：外链游戏用 git 对比版本
+
+- 外链游戏（`prepare_game` 的 `channel: "external"`）准备更新时不再扫描和哈希项目文件，改用 git：列出上次外链发布以来改动的文件，`comparison.log` 是这段时间的提交说明，用来写更新说明。还没提交的改动不算在内。
+- `publish_link` 带上项目目录时，会记下当时的 git 提交，下次更新才能对比。不是 git 仓库或上次没记提交时，`baselineAvailable: false`，照常发布。
+- 第一次发布也不再扫描文件（本来就没有上一版可比）。
+- 工具没有新增。已装 v0.16.0 以上的不用动，会自动更新。
 
 ## v0.17.8：屏幕可选「自适应」
 

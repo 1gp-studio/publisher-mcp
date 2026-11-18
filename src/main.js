@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { automaticPublishPrompt, localPublishPrompt, githubPreparationPrompt, dockerPublishPrompt, multilingualPrompt, updateGamePrompt } from './publishing-prompts.js';
-import { prepareRelease, sourceSnapshot } from './releases.js';
+import { prepareRelease, sourceSnapshot, gitHead } from './releases.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
@@ -108,7 +108,9 @@ server.registerTool('publish_link',{description:'Before updating, reuse prepare_
   const meta=project_directory?await projectMetadata(project_directory):{};
   const name=title||meta.title;
   if(!name)return result({error:'请提供游戏名称（title），或给出含 project.godot / package.json 的 project_directory。',code:'TITLE_REQUIRED'});
-  const data=await publishGameUpdate(platform,{projectDirectory:project_directory,updateId:release.updateId},client=>client.request('/api/publish',{body:{source:'external',release,url,title:name,description:description||meta.description||''}}));
+  // The commit lets the next link update compare with git; the platform never receives the files.
+  const sourceCommit=project_directory&&isAbsolute(project_directory)?await gitHead(project_directory):undefined;
+  const data=await publishGameUpdate(platform,{projectDirectory:project_directory,updateId:release.updateId},client=>client.request('/api/publish',{body:{source:'external',release:{...release,...(sourceCommit?{sourceCommit}:{})},url,title:name,description:description||meta.description||''}}));
   return result(withMaterialNextSteps({...data,...(data.path?{gameUrl:platform.origin+data.path}:{})}));
 });
 server.registerTool('get_publish_status',{description:'Read/reconcile a build owned by the connected account. Poll no more often than every 10 seconds. Only ready confirms deployment completion; it does not verify gameplay or multiplayer correctness.',inputSchema:{build_id:z.uuid()},annotations:{readOnlyHint:true,openWorldHint:true}},async({build_id})=>{

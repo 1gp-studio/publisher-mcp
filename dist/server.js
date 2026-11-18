@@ -8510,7 +8510,7 @@ var classificationGuidance = {
 };
 
 // src/publishing-prompts.js
-var setup = "先调用 get_publisher_info 核对当前实际运行的 AIWANNA MCP，以它返回的版本和能力为准（0.17.8 起它会先自动更新再回答；握手 serverInfo.version 是更新前的，不作数），要求至少 0.17.8；工具名称存在或本地配置写了新版都不能证明进程已升级。缺少 MCP 才安装用户级 v0.17.8，不在游戏项目新建 .mcp.json。Claude Code 首次安装：claude mcp add onegp --scope user -- npx --yes https://codeload.github.com/1gp-studio/publisher-mcp/tar.gz/refs/tags/v0.17.8；其他客户端见 https://github.com/1gp-studio/publisher-mcp。低于 0.17.8 或返回 upgrade.automatic:false 时，只把当前客户端已有用户级 AIWANNA 配置的固定版本改成 v0.17.8，保留其他参数、环境配置和已有授权凭证，不重装全部配置、不重复授权。重新加载 MCP 后复查实际运行版本；客户端不能重载时才请我重启，确认新工具生效后继续。这是最后一次手动升级，之后自动更新。刚安装或手动升级后，当前对话往往还调不到新工具（Claude Code、Codex 都在开始会话时加载 MCP）；自动更新后需要的新工具仍看不到（有的客户端不刷新工具列表）也一样。这时直接告诉我“请重开 AI 工具或新开对话，再发一次这段提示词”，不要假装已连上，也不要绕过 MCP 用别的办法上传。更高且兼容的版本直接使用，不降级；读不到版本时明确说明，不能猜测已升级。使用已连接的 AIWANNA MCP，在当前本地游戏项目中操作。只有收到 AUTH_REQUIRED 才调用 connect_platform，让我本人完成账号授权；已有明确授权和选择直接沿用，不反复确认。";
+var setup = "先调用 get_publisher_info 核对当前实际运行的 AIWANNA MCP，以它返回的版本和能力为准（0.17.9 起它会先自动更新再回答；握手 serverInfo.version 是更新前的，不作数），要求至少 0.17.9；工具名称存在或本地配置写了新版都不能证明进程已升级。缺少 MCP 才安装用户级 v0.17.9，不在游戏项目新建 .mcp.json。Claude Code 首次安装：claude mcp add onegp --scope user -- npx --yes https://codeload.github.com/1gp-studio/publisher-mcp/tar.gz/refs/tags/v0.17.9；其他客户端见 https://github.com/1gp-studio/publisher-mcp。低于 0.17.9 或返回 upgrade.automatic:false 时，只把当前客户端已有用户级 AIWANNA 配置的固定版本改成 v0.17.9，保留其他参数、环境配置和已有授权凭证，不重装全部配置、不重复授权。重新加载 MCP 后复查实际运行版本；客户端不能重载时才请我重启，确认新工具生效后继续。这是最后一次手动升级，之后自动更新。刚安装或手动升级后，当前对话往往还调不到新工具（Claude Code、Codex 都在开始会话时加载 MCP）；自动更新后需要的新工具仍看不到（有的客户端不刷新工具列表）也一样。这时直接告诉我“请重开 AI 工具或新开对话，再发一次这段提示词”，不要假装已连上，也不要绕过 MCP 用别的办法上传。更高且兼容的版本直接使用，不降级；读不到版本时明确说明，不能猜测已升级。使用已连接的 AIWANNA MCP，在当前本地游戏项目中操作。只有收到 AUTH_REQUIRED 才调用 connect_platform，让我本人完成账号授权；已有明确授权和选择直接沿用，不反复确认。";
 var hosting = "所有新增托管使用 AIWANNA 的资源，不要求我登录 Vercel、AWS 或 ECR，不创建个人云项目或索取云密钥。不上传凭证、无关源码或 source map。";
 var prepare = "先调用一次 prepare_game，它会识别原游戏、发布渠道、版本差异、构建方式、语言、已有可选功能、页面物料 materials 和常规上架清单 promotion。复用返回结果，不紧接着重复调用 find_my_game、prepare_release、inspect_game、check_game_languages 或 get_game_materials；代码或物料改变后只重查受影响的部分。多个游戏匹配时让我选择，不猜编号。同一任务复用返回的 updateId，所有发布 release.updateId 均带它；更新 features 或重查时传 update_id。UPDATE_IN_PROGRESS 时明确恢复旧任务或确认独立任务后 new_update=true，不擅自遗忘旧更新。";
 var choices = `${publishingFeaturePolicy.zh}发布完成后按 prepare_game.optionalFeatures 简短提醒我还有哪些可选功能没用上（多语言、云存档、排行榜、预览），说明可以帮我接入或补齐，由我决定。未回答不等于同意，不因发布而自动开启功能，也不因本次不接入而关闭已有功能。选择云存档或排行榜后按 add_cloud_saves、add_leaderboard 的流程配置并改造游戏代码；新游戏必须先有真实游戏 ID，缺少 ID 时保持请求关闭，不编造配置。`;
@@ -8707,6 +8707,46 @@ async function findMyGame(platform2, projectDirectory, gameSlug2) {
 
 // src/releases.js
 var exec3 = promisify3(execFile3);
+var git2 = async (root, args) => (await exec3("git", ["-C", root, ...args], { timeout: 1e4, maxBuffer: 4 * 1024 * 1024 })).stdout;
+var commitId = /^[a-f0-9]{40}$/;
+var projectIdOf = (root) => createHash3("sha256").update(root).digest("hex").slice(0, 32);
+async function gitHead(directory3) {
+  try {
+    const head = (await git2(directory3, ["rev-parse", "HEAD"])).trim();
+    return commitId.test(head) ? head : void 0;
+  } catch {
+    return void 0;
+  }
+}
+var logLimit = 100;
+async function compareCommits(root, previous, head) {
+  const none = { baselineAvailable: false, method: "git", added: [], changed: [], removed: [] };
+  if (!head || !commitId.test(previous ?? "")) return none;
+  try {
+    await git2(root, ["cat-file", "-e", `${previous}^{commit}`]);
+    const fields = (await git2(root, ["diff", "--relative", "--no-renames", "--name-status", "-z", `${previous}..${head}`, "--", "."])).split("\0");
+    const added = [], changed2 = [], removed = [];
+    for (let index = 0; index + 1 < fields.length; index += 2) {
+      const [status, path] = [fields[index], fields[index + 1]];
+      if (!path || /^1gp-kit(?:[\\/]|$)/i.test(path)) continue;
+      (status === "A" ? added : status === "D" ? removed : changed2).push(path);
+    }
+    const log = (await git2(root, ["log", "--oneline", "--no-decorate", `--max-count=${logLimit + 1}`, `${previous}..${head}`, "--", "."])).split("\n").filter(Boolean);
+    return {
+      baselineAvailable: true,
+      method: "git",
+      from: previous,
+      to: head,
+      added: added.sort(),
+      changed: changed2.sort(),
+      removed: removed.sort(),
+      log: log.slice(0, logLimit),
+      ...log.length > logLimit ? { logTruncated: true } : {}
+    };
+  } catch {
+    return none;
+  }
+}
 async function sourceSnapshot(directory3) {
   if (!isAbsolute5(directory3)) throw new Error("Project directory must be absolute");
   const root = await realpath5(directory3), files = {};
@@ -8728,13 +8768,8 @@ async function sourceSnapshot(directory3) {
     }
   }
   await walk2(root);
-  let commit;
-  try {
-    const { stdout } = await exec3("git", ["-C", root, "rev-parse", "HEAD"], { timeout: 1e4, maxBuffer: 4096 });
-    if (/^[a-f0-9]{40}$/.test(stdout.trim())) commit = stdout.trim();
-  } catch {
-  }
-  return { projectId: createHash3("sha256").update(root).digest("hex").slice(0, 32), sourceFiles: files, ...commit ? { sourceCommit: commit } : {} };
+  const commit = await gitHead(root);
+  return { projectId: projectIdOf(root), sourceFiles: files, ...commit ? { sourceCommit: commit } : {} };
 }
 function compareSources(previous, current) {
   const gameSource = (files) => Object.fromEntries(Object.entries(files ?? {}).filter(([path]) => !/^1gp-kit(?:[\\/]|$)/i.test(path)));
@@ -8744,23 +8779,26 @@ function compareSources(previous, current) {
   return { baselineAvailable: true, added: Object.keys(current).filter((k) => !previous[k]).sort(), changed: Object.keys(current).filter((k) => previous[k] && previous[k] !== current[k]).sort(), removed: Object.keys(previous).filter((k) => !current[k]).sort() };
 }
 async function prepareRelease(platform2, directory3, gameSlug2, dockerProject2) {
-  const snapshot3 = await sourceSnapshot(directory3);
+  if (!isAbsolute5(directory3)) throw new Error("Project directory must be absolute");
+  const root = await realpath5(directory3), projectId = projectIdOf(root);
   if (!dockerProject2) {
     const found2 = await findMyGame(platform2, directory3, gameSlug2);
     if (found2.error) return found2;
     if (!gameSlug2 && found2.matches?.length > 1) return { ...found2, code: "CHOOSE_GAME" };
     gameSlug2 = gameSlug2 ?? found2.gameSlug;
   }
-  const params = new URLSearchParams(gameSlug2 ? { slug: gameSlug2 } : dockerProject2 ? { dockerProject: dockerProject2 } : { projectId: snapshot3.projectId });
+  const params = new URLSearchParams(gameSlug2 ? { slug: gameSlug2 } : dockerProject2 ? { dockerProject: dockerProject2 } : { projectId });
   const context = await platform2.request("/api/publish/releases/context?" + params);
   if (context.error) return context;
+  const head = await gitHead(root), manifest = context.previous?.source_manifest;
+  const comparison = context.source === "external" ? await compareCommits(root, context.previous?.source_commit, head) : manifest && Object.keys(manifest).length ? compareSources(manifest, (await sourceSnapshot(root)).sourceFiles) : compareSources(null, {});
   return {
     ...context,
     ...updateRoute(context),
     previous: context.previous ? { ...context.previous, source_manifest: void 0 } : null,
-    comparison: compareSources(context.previous?.source_manifest, snapshot3.sourceFiles),
-    sourceCommit: snapshot3.sourceCommit,
-    instructions: `Read the changed local files to understand gameplay, levels, balance, fixes, UX and assets. File names alone do not establish major/minor changes. Use major for substantial redesign/save incompatibility, minor for new gameplay or levels, patch for fixes/balance, assets for resource-only changes (patch increment). Start at 1.0.0. Choose the corresponding suggested version and write concise player-facing notes by relevant area. If no baseline exists, inspect actual code and describe only verified changes; never invent a comparison. Before actual publication, obtain and reuse the logical updateId from prepare_game. Then follow channel/nextSteps: supply release {updateId,version,title,notes,changeType} to the matching tool (update_github_game, publish_game, publish_link or publish_docker_game); the platform attaches notes to the private build history; a successful update deployment alone never writes its public version record. ${updateApprovalGuidance.en} ${updateHistoryGuidance.en}`
+    comparison,
+    ...head ? { sourceCommit: head } : {},
+    instructions: `${comparison.method === "git" ? comparison.baselineAvailable ? "This link game is compared with git: comparison lists files changed since the commit of the last link publication and comparison.log its commit messages; edits not yet committed are not included. " : "No git baseline for this link game (not a repository, or the last link publication kept no commit): publish as usual. " : ""}Read the changed local files to understand gameplay, levels, balance, fixes, UX and assets. File names alone do not establish major/minor changes. Use major for substantial redesign/save incompatibility, minor for new gameplay or levels, patch for fixes/balance, assets for resource-only changes (patch increment). Start at 1.0.0. Choose the corresponding suggested version and write concise player-facing notes by relevant area. If no baseline exists, inspect actual code and describe only verified changes; never invent a comparison. Before actual publication, obtain and reuse the logical updateId from prepare_game. Then follow channel/nextSteps: supply release {updateId,version,title,notes,changeType} to the matching tool (update_github_game, publish_game, publish_link or publish_docker_game); the platform attaches notes to the private build history; a successful update deployment alone never writes its public version record. ${updateApprovalGuidance.en} ${updateHistoryGuidance.en}`
   };
 }
 
@@ -38108,7 +38146,7 @@ var StdioServerTransport = class {
 // package.json
 var package_default = {
   name: "@1gp-studio/publisher-mcp",
-  version: "0.17.8",
+  version: "0.17.9",
   description: "Publish web games to 1GP Studio from MCP clients such as Codex and Claude Code",
   type: "module",
   bin: {
@@ -45952,7 +45990,8 @@ server.registerTool("publish_link", { description: "Before updating, reuse prepa
   const meta3 = project_directory ? await projectMetadata(project_directory) : {};
   const name = title || meta3.title;
   if (!name) return result({ error: "请提供游戏名称（title），或给出含 project.godot / package.json 的 project_directory。", code: "TITLE_REQUIRED" });
-  const data = await publishGameUpdate(platform, { projectDirectory: project_directory, updateId: release.updateId }, (client) => client.request("/api/publish", { body: { source: "external", release, url: url2, title: name, description: description || meta3.description || "" } }));
+  const sourceCommit = project_directory && isAbsolute17(project_directory) ? await gitHead(project_directory) : void 0;
+  const data = await publishGameUpdate(platform, { projectDirectory: project_directory, updateId: release.updateId }, (client) => client.request("/api/publish", { body: { source: "external", release: { ...release, ...sourceCommit ? { sourceCommit } : {} }, url: url2, title: name, description: description || meta3.description || "" } }));
   return result(withMaterialNextSteps({ ...data, ...data.path ? { gameUrl: platform.origin + data.path } : {} }));
 });
 server.registerTool("get_publish_status", { description: "Read/reconcile a build owned by the connected account. Poll no more often than every 10 seconds. Only ready confirms deployment completion; it does not verify gameplay or multiplayer correctness.", inputSchema: { build_id: external_exports.uuid() }, annotations: { readOnlyHint: true, openWorldHint: true } }, async ({ build_id }) => {

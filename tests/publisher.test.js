@@ -135,6 +135,12 @@ test('publish_link posts an external URL with the client token and returns the g
   assert.equal(data.gameUrl,`${origin}/games/game-abc`);
   assert.equal(data.workflowComplete,false);assert.equal(data.gameSlug,'game-abc');assert.equal(data.materialStatus,'needs_verification');
   assert.match(data.nextSteps.join('\n'),/1gp-kit\/game\.json/);assert.match(data.nextSteps.join('\n'),/set_game_media/);
+  // From a git repository the publication records its commit, so the next link update compares with git.
+  const {execFileSync}=await import('node:child_process');
+  const git=(...args)=>execFileSync('git',['-C',game,'-c','user.name=Test','-c','user.email=test@example.com','-c','commit.gpgsign=false',...args],{encoding:'utf8'}).trim();
+  git('init','-q');git('add','project.godot');git('commit','-q','-m','First');
+  await client.callTool({name:'publish_link',arguments:{release,url:'https://example.github.io/dgame/',project_directory:game}});
+  assert.deepEqual(body.release,{...release,sourceCommit:git('rev-parse','HEAD')});
 });
 async function godotFixture(t) {
   const {mkdir,utimes}=await import('node:fs/promises');
